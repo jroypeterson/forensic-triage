@@ -158,3 +158,28 @@ When the user wants to cover a new sector:
 3. Add a row to the routing table in Step 3 of the workflow
 
 Don't bloat existing rubrics with sector-specific rules.
+
+## Run modes: interactive vs scheduled trigger
+
+There are two ways this workflow runs, and they have **different tool surfaces**.
+
+### Interactive (local Claude Code session)
+You say "run forensic triage" in a local session and Claude executes the workflow on your machine. **This is the working mode today.** Your `claude.ai` MCP connectors (Edgar-Tools, Slack, Notion, Gmail, etc.) are all available — so the rubric works as written, including `edgar_notes` quoting and Slack posting.
+
+### Scheduled remote trigger (cloud CCR session)
+A weekly trigger runs Claude in Anthropic's cloud on a cron schedule (`trig_01TgUC5JJ2Wzz7fF7skw9Cd6`, Saturday 09:00 ET / 13:00 UTC). The trigger config is at https://claude.ai/code/scheduled/trig_01TgUC5JJ2Wzz7fF7skw9Cd6.
+
+**KNOWN GOTCHA:** Scheduled triggers do **not** receive user-configured `claude.ai` connector MCPs, even when listed in the trigger's `mcp_connections`. The platform appears to auto-attach only the GitHub MCP for repo access. Calibration runs on 2026-04-08 confirmed that **both** `Edgar-Tools` and `Slack` were absent from the trigger session despite being attached in config.
+
+What this means for the trigger:
+- It cannot call `edgar_notes`, `company_brief`, etc. — falls back to raw `https://data.sec.gov` XBRL `companyconcept` API + WebFetch on 10-K HTML, which **truncates on large filings** and cannot extract financial statement notes
+- It cannot post to Slack via the connector — would need an incoming webhook for `#forensic-flags`
+- The trigger's first calibration run still produced an excellent AHCO Red-tier analysis using the fallback path, but missed the four most important notes (revenue recognition, debt covenants, goodwill detail, current legal proceedings)
+
+### Recommended path forward
+**Run interactively for now.** The framework, rubrics, and scoring all work — they just need the MCPs. If unattended weekly automation becomes valuable enough, the migration is:
+1. Add `edgartools` Python package + a helper script that pulls all required data per ticker as JSON (replaces the MCP for the data layer)
+2. Add a Slack webhook + `curl` post (replaces the Slack MCP)
+3. Update the trigger prompt to call the helper script instead of MCP tools
+
+Until that work is done, the trigger will produce a partial report on Saturdays. That's acceptable for v1 — the analysis is still strong on the data the fallback can reach (XBRL ratios, governance signals from 8-Ks via the SEC EDGAR full-text search). Interactive runs remain the source of truth for full-quality analysis.

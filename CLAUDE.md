@@ -146,10 +146,44 @@ sbc_pct_revenue, goodwill_pct_assets, ... (sector-specific columns appended)
 ```
 
 ## Tools
-- **edgartools MCP** — primary data source. Prefer this over web search for any financial ratio or filing question.
+- **edgartools MCP** — primary data source. Prefer this over web search for any financial ratio or filing question. **Requires Pro tier** ($24.99/mo at https://app.edgar.tools/pricing) — see "Edgar-Tools tier requirements" below.
 - **WebSearch** — only for things EDGAR doesn't have (short interest, borrow cost, recent press)
 - **File tools** — read/write CSVs and reports directly
 - **Bash** — `python sync_watchlist.py` before every triage run
+
+## Edgar-Tools tier requirements
+
+The forensic rubric needs ~80% of fields that are **gated behind Edgar-Tools Pro**. Free tier returns the literal string `"upgrade_required"` for most ratios and TOC-only for note bodies. Specifically:
+
+| Call | Free tier delivers | Pro unlocks (rubric needs these) |
+|---|---|---|
+| `financial_snapshot` | 5 profitability margins | ROE, ROA, current/quick ratio, D/E, debt/assets, net debt/EBITDA |
+| `financial_trends` | 3yr × 2 concepts | 10yr × all 8 concepts + trend classification + anomaly flags |
+| `edgar_notes` | TOC + note titles only | **Full note body text** — required for quoting 10-K language in Red-tier reports |
+| `company_brief` | Profile + counts | Insider sentiment, event summaries, fund detail, financial health assessment |
+| `material_events` | Truncated (≤1–2 events on free) | Full 8-K history |
+
+**Pro daily limit: 500 API calls.** A full 329-ticker run at ~6 calls/ticker = ~2,000 calls = ~4× the cap. Mitigations:
+1. Lean on `company_brief` (bundles many signals) — only escalate to other calls when a flag fires
+2. Pilot on `core=true` names first (~30–60 tickers, fits in one day)
+3. For full runs, batch across days (e.g. ~80 tickers/day Mon–Fri, report Saturday)
+
+Realistic per-ticker call count with smart patterns is 2–3, not 6 — bringing a full run closer to ~700–1,000 calls.
+
+### `edgar_notes` topic search is literal, not semantic
+
+The `topic` parameter does **substring matching against note titles**, not concept search. Calling `edgar_notes(ticker, "revenue")` returns "no notes matched" even when revenue policy lives inside Note 2 ("Summary of Significant Accounting Policies"). Use note-title keywords instead:
+
+| What you want | What to pass as `topic` |
+|---|---|
+| Revenue recognition policy | `"Policies"` or `"Significant Accounting"` |
+| Debt covenants, maturities, off-BS | `"Debt"` |
+| Goodwill impairment | `"Goodwill"` |
+| Lease obligations | `"Leases"` |
+| Legal proceedings, contingencies | `"Commitments"` or `"Contingencies"` |
+| Segment data | `"Segment"` |
+
+When in doubt, call `edgar_notes` once with a broad topic, read the `notes_toc` it returns, then call again with an exact title-substring from the TOC.
 
 ## Adding Sectors
 When the user wants to cover a new sector:

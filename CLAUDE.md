@@ -31,7 +31,8 @@ The watchlist is **derived from** `../Coverage Manager/data/coverage_universe_ti
 - Maps Coverage Manager `Sector (JP)` → forensic `sector_subgroup`:
   - `Healthcare Services` → `hc_services`
   - `MedTech`, `Life Science Tools` → `medtech`
-  - `Tech`, `SaaS`, `PA`, `Fintech`, `Other`, `Healthcare Real Estate` → `general`
+  - `Tech`, `SaaS`, `Fintech`, `Other` → `general`
+  - (Coverage Manager retired `PA` → `Other` and `Healthcare Real Estate` → `Healthcare Services` on 2026-04-17. Former HC Real Estate rows now roll up under `hc_services` via the `Healthcare Services` sector.)
 - Preserves `notes` and original `added_date` for tickers that survive
 - Propagates `Core` flag and `Subsector (JP)` from coverage master
 - Reports adds / removes / subgroup changes to stdout

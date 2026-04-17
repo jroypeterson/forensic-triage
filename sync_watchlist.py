@@ -35,7 +35,11 @@ def resolve_coverage_csv() -> Path:
         return Path(env_path)
     return ROOT.parent / "Coverage Manager" / "data" / "coverage_universe_tickers.csv"
 
-# Map Coverage Manager Sector (JP) -> forensic_triage sector_subgroup
+# Map Coverage Manager Sector (JP) -> forensic_triage sector_subgroup.
+# Kept in sync with Coverage Manager's ALLOWED_SECTORS_JP (config.py).
+# Coverage Manager retired "PA" and "Healthcare Real Estate" on 2026-04-17
+# (collapsed into "Other" and "Healthcare Services" respectively). The new
+# "Healthcare Real Estate" subsector rolls up under hc_services here.
 SUBGROUP_MAP = {
     "Healthcare Services": "hc_services",
     "MedTech": "medtech",
@@ -43,10 +47,8 @@ SUBGROUP_MAP = {
     # Everything else that survives the filter falls through to "general"
     "Tech": "general",
     "SaaS": "general",
-    "PA": "general",
     "Fintech": "general",
     "Other": "general",
-    "Healthcare Real Estate": "general",
 }
 
 EXCLUDED_SECTORS = {"Biopharma"}

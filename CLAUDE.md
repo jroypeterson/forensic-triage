@@ -88,6 +88,33 @@ For each ticker in `watchlist.csv`:
 4. Use `insider_activity` for Form 4 clusters
 5. Use `edgar_notes(ticker, '<topic>')` on demand when a flag fires — `revenue`, `leases`, `debt`, `goodwill`, `contingencies`
 
+#### What the 3-call baseline catches vs. needs escalation
+
+Calibrated 2026-04-17 on an 8-ticker smoke test (AAPL, CVNA, AHCO, CVS, HIMS, JNJ, DXCM, TMDX). The cheap baseline = `company_brief` + `financial_snapshot` + `financial_trends`.
+
+| Family | Baseline catches it? | Escalation needed |
+|---|---|---|
+| Accruals (CFO/NI) | ✅ — `company_brief` returns NI + CFO directly | none for the < 0.5 rule; `financial_statements` for Sloan accruals |
+| Revenue quality (DSO, gross margin trend) | ❌ | `financial_statements` for AR; `financial_trends` for gross_profit (sometimes missing — see below) |
+| Expense capitalization | ❌ | `financial_statements` (capex, D&A) + `edgar_notes("Policies")` |
+| Balance sheet bloat (inventory, AR, goodwill %) | ❌ | `financial_statements` for line items |
+| Leverage hiding | ⚠️ partial — `recent_events` catches new 2.03 / 8-K debt items; ratio leverage visible | `edgar_notes("Debt")` for off-BS, factoring, supplier finance |
+| Governance | ✅ — `recent_events` shows 4.01/4.02/5.02/NT items by date | none unless a 4.02/restatement requires note-text quoting for the report |
+| Market signals | ⚠️ — `insider_activity` shows top 3 transactions (date + dollar) but not pct-of-holdings | `insider_activity(detailed=True)` if available, or skip the 25%-of-holdings clause |
+| Text signals | ❌ | `edgar_notes` for risk-factor/MD&A diffs (rarely worth the call) |
+| Sector-specific (every rule) | ❌ | `edgar_notes` for the topics in each sector rubric |
+
+**Auto-escalation triggers** (apply during Step 1 to keep the per-ticker call count down):
+
+1. `subgroup ∈ {hc_services, medtech}` AND (`health_hint != "strong"` OR `CFO/NI < 0.7`) → pull one targeted `edgar_notes` for the top sector concern (hc: `"Policies"` for revenue/bad-debt; medtech: `"Inventory"` or `"Commitments"`).
+2. Any `recent_event` item ∈ {4.01, 4.02, NT, 2.03} in last 90 days → pull `edgar_notes` for the obvious topic (4.02 → `"Restatement"` if present; 2.03 → `"Debt"`).
+3. CFO/NI < 0.5 with positive NI → pull `financial_statements` for balance-sheet deltas to identify the source of the gap.
+4. Any historically-flagged name (per `notes` column or prior-run history) → escalate even if baseline is clean. Baseline alone is too forgiving on these — CVNA was the smoke-test example.
+
+**Quirk:** `financial_trends` sometimes omits the `revenue` and `gross_profit` arrays even when explicitly requested (saw on CVS, TMDX in the smoke test). Compute YoY revenue from `company_brief` + a one-off `financial_statements` call when the trend array is missing.
+
+**Budget:** baseline 3 calls × 339 tickers = ~1,000 calls (above the 500/day cap). Use `core=true` filter to land at ~227 tickers, batched across days. Per-ticker including escalations runs ~3.5 calls on average.
+
 ### Step 2: Run general flags
 Apply `rubrics/general.md` to every company. Compute the ratios, evaluate flag rules, record which families fired in `flags_history.csv`.
 

@@ -1,4 +1,11 @@
 # Forensic Triage
+> Claude-driven forensic-accounting screen over the coverage universe — flags US-listed names with accounting irregularities / quality-of-earnings concerns (Red/Yellow/Green); output is flagged companies + specific concerns, not a composite score.
+
+- **Status:** live (interactive is the source-of-truth mode; the Saturday remote trigger runs degraded without MCPs)
+- **Runtime/trigger:** Claude-driven on-demand (interactive) · scheduled remote CCR trigger (Sat 09:00 ET)
+- **Reads:** Coverage Manager `coverage_universe_tickers.csv` (synced) · edgartools MCP (snapshots / statements / trends / events / notes) · WebSearch (insider / short interest)
+- **Writes:** `data/{watchlist,flags_history,ratios_latest}.csv` · `reports/forensic_<date>.md` · Slack `#forensic-flags` (heartbeat)
+- **Run:** `python sync_watchlist.py`, then Claude runs the 5-step workflow  ·  **Entry points:** `sync_watchlist.py`, `CLAUDE.md`, `rubrics/`
 
 Claude-driven forensic accounting screen for a coverage universe of US-listed companies. Surfaces names with accounting irregularities or quality-of-earnings concerns worth a deep dive — output is **flagged companies + the specific concerns**, not a single composite score.
 

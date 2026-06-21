@@ -67,9 +67,25 @@ Composite scores (Beneish M, Dechow F, Altman Z, Sloan accruals) are computed as
 
 | Tier | Meaning | Action |
 |---|---|---|
-| **Red** | 3+ flag families fired OR any single critical flag (restatement, late filing, auditor resignation, 8-K 4.02) | Deep dive — read latest 10-K notes, MD&A, and any 8-Ks |
-| **Yellow** | 2 flag families fired, OR new flag this run that wasn't there last run | Skim filings, set a watch |
-| **Green** | 0–1 flag families fired and no governance signals | No action |
+| **Red** | 3+ flag families fired, OR any single **critical governance** flag (8-K 4.02 / restatement / auditor resignation-with-disagreement / late filing — `general.md` §6a) | Deep dive — read latest 10-K notes, MD&A, and any 8-Ks |
+| **Yellow** | 2 flag families fired, OR a **new** flag this run that wasn't there last run, OR a single **high-severity** accounting family (e.g. a revenue/inventory collapse, a fresh FCA/qui-tam matter) even when only one family fired | Skim filings, set a watch |
+| **Green** | 0–1 flag families fired, no critical-governance signal, **and the rubric was actually evaluable** | No action |
+| **Data Gap** | The rubric **could not be evaluated** — a foreign 20-F/IFRS filer (`filer_type=foreign`), a filing staler than ~400 days with no current-year 10-K, or required financial statements/notes unavailable | Manual review — never treat as Green |
+| **Corporate Action** | A non-accounting structural event (completed merger / take-private / delisting — 8-K 5.01/2.01/3.01) with no accounting concern | Flag for **watchlist removal**, not Red |
+
+**"Unable to evaluate" is NOT Green** (calibration 2026-06-20). A name whose data the rubric can't
+read goes to **Data Gap**, never Green — a data gap silently passing as a clean bill is the most
+dangerous failure mode (PHG/INMD were wrongly Green in the June run). `sync_watchlist.py` tags
+`filer_type=foreign` for ADR/20-F filers; those are Data Gap by default unless a domestic 10-K is found.
+
+**Critical vs soft governance.** Only **critical** governance (§6a) auto-Reds or blocks a Green. **Soft**
+governance (§6b: routine CFO/audit-chair turnover, clean auditor re-tender) counts as one ordinary
+family toward the combination — it does not, by itself, escalate to Red (calibration 2026-06-20:
+MASI's take-private and routine C-suite churn were over-firing Red).
+
+**Corporate actions are not accounting flags.** A completed merger / take-private / delisting is a
+structural event — tier it **Corporate Action** and flag the name for removal at the next sync, do
+NOT score it Red (MASI, June run).
 
 **Diff > level.** A company moving Green → Yellow this week is more interesting than one that's been Yellow for six months. `flags_history.csv` exists to make diffs cheap.
 
@@ -81,7 +97,9 @@ When the user says "run forensic triage" or similar:
 Run `python sync_watchlist.py` first. Note any adds/removes/subgroup changes — new names get an automatic Yellow tier on their first appearance (no flag history to compare against, so flag them for a baseline read).
 
 ### Step 1: Pull data
-For each ticker in `watchlist.csv`:
+**First, route `filer_type=foreign` names straight to Data Gap** — do NOT spend EDGAR calls on them; the 10-K-based rubric can't evaluate a 20-F/IFRS filer. List them under the Data Gap section of the report for manual review.
+
+For each **domestic** ticker in `watchlist.csv`:
 1. Use `mcp__claude_ai_Edgar_Tools__company_brief` for the snapshot
 2. Use `financial_statements` and `financial_trends` for the ratio inputs (need 3+ years of trailing data for YoY comps)
 3. Use `material_events` for 8-Ks (auditor changes, Item 4.02 non-reliance)
@@ -113,7 +131,7 @@ Calibrated 2026-04-17 on an 8-ticker smoke test (AAPL, CVNA, AHCO, CVS, HIMS, JN
 
 **Quirk:** `financial_trends` sometimes omits the `revenue` and `gross_profit` arrays even when explicitly requested (saw on CVS, TMDX in the smoke test). Compute YoY revenue from `company_brief` + a one-off `financial_statements` call when the trend array is missing.
 
-**Budget:** baseline 3 calls × 339 tickers = ~1,000 calls (above the 500/day cap). Use `core=true` filter to land at ~227 tickers, batched across days. Per-ticker including escalations runs ~3.5 calls on average.
+**Budget:** the real Edgar-Tools **Pro cap is 10,000 calls/day** (the old "500/day" was stale — corrected 2026-06-20; the June run confirmed 10k). At ~3.5–3.7 calls/ticker incl. escalations, the **full ~301-name watchlist ≈ 1,100 calls — comfortably a single day's run.** The June 50-name pilot used ~185 calls. So batching across days is **not** required; run the whole universe in one interactive session. `core=true` (~30–60 names) is still useful for a fast first pass, not a budget necessity. Foreign filers (`filer_type=foreign`) are skipped from EDGAR pulls — they go straight to Data Gap.
 
 ### Step 2: Run general flags
 Apply `rubrics/general.md` to every company. Compute the ratios, evaluate flag rules, record which families fired in `flags_history.csv`.
@@ -141,6 +159,12 @@ Write a markdown report to `reports/forensic_YYYY-MM-DD.md`:
 ## Yellow (watch)
 | Ticker | Subgroup | Flags fired | New this run? | One-liner concern |
 
+## Data Gap (manual review — NOT screened)
+| Ticker | Subgroup | Why | (e.g. foreign 20-F filer / FY24 10-K 473d stale / financial statements unavailable) |
+
+## Corporate Action (flag for watchlist removal)
+| Ticker | Event | (e.g. take-private merger closed 2026-06-10) |
+
 ## Diffs since last run
 - TICKER: Green → Yellow (revenue quality flag fired — DSO +28% YoY while revenue growth decelerated)
 - ...
@@ -149,22 +173,24 @@ Write a markdown report to `reports/forensic_YYYY-MM-DD.md`:
 - TICKER: Yellow → Green (inventory normalized)
 ```
 
+Tier precedence when assigning: **Corporate Action** (structural exit) → **Data Gap** (unevaluable) → **Red** (critical-gov or 3+ families) → **Yellow** (2 families / new flag / single high-severity) → **Green** (evaluated clean). A name is never Green unless it was actually evaluated.
+
 For each Red name, also pull and quote the relevant 10-K note via `edgar_notes` so the user can read the source language without leaving the report.
 
 ## CSV Formats
 
 ### watchlist.csv
 ```
-ticker, company_name, sector_subgroup, subsector, core, added_date, notes
+ticker, company_name, sector_subgroup, subsector, core, filer_type, added_date, notes
 ```
-`sector_subgroup` values: `hc_services`, `medtech`, `general`. `subsector` and `core` come from Coverage Manager (`Subsector (JP)`, `Core`). `notes` is the only column safe to hand-edit — everything else is overwritten by `sync_watchlist.py`.
+`sector_subgroup` values: `hc_services`, `medtech`, `general`. `subsector` and `core` come from Coverage Manager (`Subsector (JP)`, `Core`). `filer_type` is `domestic` (10-K filer) or `foreign` (ADR/20-F/IFRS — derived from CM `Country (ISO)` + `Listing Type`); **`foreign` names route to the Data Gap tier** (the 10-K-based rubric can't evaluate a 20-F), so they're tagged not screened. `notes` is the only column safe to hand-edit — everything else is overwritten by `sync_watchlist.py`.
 
 ### flags_history.csv
 ```
 run_date, ticker, tier, accruals_flag, revenue_flag, capex_flag, balance_sheet_flag,
 leverage_flag, governance_flag, market_flag, text_flag, sector_flag, flag_details
 ```
-Boolean columns are 0/1. `flag_details` is a free-text column listing which specific rules fired and the values.
+Boolean columns are 0/1. `tier` ∈ {`Red`, `Yellow`, `Green`, `DataGap`, `CorporateAction`}. `flag_details` is a free-text column listing which specific rules fired and the values — for `governance_flag`, mark each as `critical` (§6a) or `soft` (§6b) so the diff can tell an 8-K 4.02 from routine CFO churn. **Do not write `DataGap`/`CorporateAction` rows from the degraded Saturday trigger** — only persist interactive-run results.
 
 ### ratios_latest.csv
 ```
@@ -191,12 +217,10 @@ The forensic rubric needs ~80% of fields that are **gated behind Edgar-Tools Pro
 | `company_brief` | Profile + counts | Insider sentiment, event summaries, fund detail, financial health assessment |
 | `material_events` | Truncated (≤1–2 events on free) | Full 8-K history |
 
-**Pro daily limit: 500 API calls.** A full 329-ticker run at ~6 calls/ticker = ~2,000 calls = ~4× the cap. Mitigations:
+**Pro daily limit: 10,000 API calls** (corrected 2026-06-20 — the prior "500/day" here was stale and drove unnecessary multi-day batching). A full ~301-name run at a realistic 2–4 calls/ticker is ~700–1,100 calls — **well under the cap, one day.** Still keep the call count lean for speed/cost:
 1. Lean on `company_brief` (bundles many signals) — only escalate to other calls when a flag fires
-2. Pilot on `core=true` names first (~30–60 tickers, fits in one day)
-3. For full runs, batch across days (e.g. ~80 tickers/day Mon–Fri, report Saturday)
-
-Realistic per-ticker call count with smart patterns is 2–3, not 6 — bringing a full run closer to ~700–1,000 calls.
+2. `core=true` first pass (~30–60 tickers) is a fast smoke-check, not a budget requirement
+3. Foreign 20-F/ADR filers (`filer_type=foreign`) are not pulled — they route to Data Gap (manual review)
 
 ### `edgar_notes` topic search is literal, not semantic
 
@@ -238,10 +262,19 @@ What this means for the trigger:
 - It cannot post to Slack via the connector — would need an incoming webhook for `#forensic-flags`
 - The trigger's first calibration run still produced an excellent AHCO Red-tier analysis using the fallback path, but missed the four most important notes (revenue recognition, debt covenants, goodwill detail, current legal proceedings)
 
-### Recommended path forward
-**Run interactively for now.** The framework, rubrics, and scoring all work — they just need the MCPs. If unattended weekly automation becomes valuable enough, the migration is:
-1. Add `edgartools` Python package + a helper script that pulls all required data per ticker as JSON (replaces the MCP for the data layer)
-2. Add a Slack webhook + `curl` post (replaces the Slack MCP)
-3. Update the trigger prompt to call the helper script instead of MCP tools
+### Decision (2026-06-20): Path B — interactive-only is the source of truth; disable the degraded trigger
 
-Until that work is done, the trigger will produce a partial report on Saturdays. That's acceptable for v1 — the analysis is still strong on the data the fallback can reach (XBRL ratios, governance signals from 8-Ks via the SEC EDGAR full-text search). Interactive runs remain the source of truth for full-quality analysis.
+Reviewed (Codex + PROJECT_BRIEF §5): **Path B for v1.** Interactive runs are the ONLY authoritative
+source. The Saturday remote trigger (`trig_01TgUC5JJ2Wzz7fF7skw9Cd6`) runs **degraded** (no Edgar-Tools,
+no Slack — see gotcha above) and produces a **partial report that misses the most important notes**
+(revenue recognition, debt covenants, goodwill detail, current legal proceedings). A partial report that
+*looks* complete is worse than no report — so the trigger should be **disabled in the claude.ai UI**
+(`https://claude.ai/code/scheduled/trig_01TgUC5JJ2Wzz7fF7skw9Cd6` → disable/delete) and its output must
+**never** be treated as a real triage. Do not append trigger-run output to `flags_history.csv`.
+
+**Path A (full unattended automation) is deferred, not chosen.** The main open uncertainty is still rubric
+calibration on the full universe, so building an `edgartools` helper now is premature. Build Path A only
+if, after a few interactive full/core cycles, missed runs become a real problem. The migration would then be:
+1. Add the `edgartools` Python package + a helper that pulls all required per-ticker data as JSON (replaces the MCP data layer)
+2. Add a Slack webhook + `curl` post (replaces the Slack MCP)
+3. Update the trigger prompt to call the helper instead of MCP tools

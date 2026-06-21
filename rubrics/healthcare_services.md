@@ -87,10 +87,19 @@ IBNR is a discretionary estimate. Under-reserving inflates current EPS at the co
 - Earnouts / contingent consideration on BS
 
 ### Flag fires if
-- Goodwill > 50% of total assets in a roll-up structure
-- OR same-store growth turning negative while reported growth stays positive (acquisitions masking organic decline)
+- **Goodwill > 50% of total assets AND at least one corroborator** — same-store/organic growth
+  turning negative while reported growth stays positive, OR a goodwill impairment recorded, OR
+  material contingent-consideration adjustments boosting EBITDA, OR elevated leverage
+  (net-debt/EBITDA > 4x), OR recurring "transaction and integration costs" > 3% of revenue for 3+ years
+- OR same-store growth turning negative while reported growth stays positive (acquisitions masking
+  organic decline) — on its own, since hidden organic decline IS the failure mode
 - OR contingent consideration adjustments boosting EBITDA materially
-- OR "transaction and integration costs" run-rated at >3% of revenue for 3+ years (becomes recurring)
+
+> **Goodwill % alone does not fire** (calibration 2026-06-20). A PE-backed roll-up legitimately
+> carries 50–65% goodwill; that's the *structure*, not the problem. It becomes a flag only when a
+> corroborator says the deal machine is masking decline or impairment is looming. This family is the
+> **single place** goodwill is scored for hc_services roll-ups — the general-rubric balance-sheet
+> family does NOT also fire on goodwill for these names (no double-count; USPH/SGRY were inflated by that).
 
 ### Why it matters
 Healthcare services is full of PE-backed and PE-exited roll-ups (US Physical Therapy, Surgery Partners, AdaptHealth, Option Care). The classic failure mode is organic decline hidden by deal flow until deal flow stops. AdaptHealth's accounting issues in 2021 are the textbook recent case.

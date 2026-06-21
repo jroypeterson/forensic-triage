@@ -13,7 +13,21 @@ Apply these to every company. Each family lists the diagnostic ratios and the fl
 
 ### Flag fires if
 - Sloan accruals > 10% of total assets **AND** CFO/NI < 0.8 for 2+ consecutive years
-- OR CFO/NI < 0.5 in current year while reported NI is positive
+- OR CFO/NI < 0.5 in the current year while reported NI is positive **AND** the gap is
+  *material and not a denominator artifact*: the dollar gap (NI − CFO) is **> 3% of revenue**
+  (so a tiny-NI year doesn't trip it on a low denominator) **AND** a genuine-accrual corroborator
+  fires — the gap **persists 2+ years**, OR a **working-capital build** explains it (AR / inventory /
+  contract assets growing faster than revenue).
+  - **Exclusion (suppresses the flag):** if the low CFO/NI is explained by a **one-time non-cash
+    gain inflating NI** (bargain purchase, fair-value step-up, debt-extinguishment gain), do **not**
+    fire — NI is temporarily high for a benign reason, not an accrual-quality problem. Report it as
+    context in the name's line, but it is not an accruals flag.
+
+> **Calibration note (2026-06-20):** a bare `CFO/NI < 0.5` over-fired — DXCM/TMDX tripped it in
+> the April smoke test, then cleared in June as **low-prior-NI artifacts** (a small NI denominator
+> makes the ratio look alarming with no real accrual problem). The fix: a materiality floor + a
+> *genuine-accrual* corroborator (persistence or a working-capital build), and an explicit exclusion
+> when the gap is just a one-time non-cash gain inflating the NI denominator (context, not a flag).
 
 ### Why it matters
 The single most replicated finding in forensic accounting research (Sloan 1996). High accruals predict earnings reversals. Companies that report earnings without cash backing are either growing aggressively into working capital or recognizing revenue too early.
@@ -69,7 +83,17 @@ The cleanest way to manufacture earnings is to move opex into the balance sheet.
 ### Flag fires if
 - Inventory growing >1.5x revenue growth for 2+ quarters
 - OR AR growing >1.5x revenue growth for 2+ quarters
-- OR goodwill > 40% of total assets (impairment risk, often roll-up)
+- OR goodwill > 40% of total assets **AND** a corroborating signal — a goodwill/intangible
+  **impairment recorded** in the period, OR **negative organic / same-store growth** while
+  reported growth is positive, OR **material contingent-consideration adjustments** boosting
+  EBITDA, OR **elevated leverage** (net-debt/EBITDA > 4x). Goodwill % **alone never fires** this
+  family — a high-goodwill balance sheet is a structure, not a problem, until something corroborates.
+
+> **Do not double-count goodwill.** For roll-up sector subgroups (hc_services physician/dental/
+> post-acute/dialysis roll-ups), goodwill risk is evaluated in the **sector** rubric
+> (`healthcare_services.md` Family 5). Count it **once** — in the sector family for those names,
+> here only for non-roll-up sectors. (Calibration 2026-06-20: SGRY/USPH were inflated toward Red
+> by goodwill firing as both `balance_sheet` and `sector` on the same fact.)
 
 ### Why it matters
 Inventory and AR bloat both indicate the income statement is running ahead of underlying demand. Goodwill bloat is a different problem — it signals roll-up accounting where impairment becomes a single-event earnings hit.
@@ -94,21 +118,33 @@ Carillion, Greensill — supplier finance programs let companies hide payables a
 
 ---
 
-## 6. Governance / Disclosure (CRITICAL — single flag = Red tier)
+## 6. Governance / Disclosure (two severities — keep them separate)
 
-### Inputs
-- 8-K Item 4.02 (non-reliance on prior financial statements) — **any one of these = automatic Red**
-- 8-K Item 4.01 (auditor change) — investigate
-- NT 10-K / NT 10-Q (late filing notification) — investigate
-- Restatement disclosed in latest 10-K
-- CFO turnover (especially repeat)
-- Audit committee chair turnover
+Split into **critical** and **soft** governance. They are NOT equivalent, and conflating them
+(calibration 2026-06-20) let routine C-suite churn look like an accounting-integrity event.
 
-### Flag fires if
-- Any of the above in the last 12 months
+### 6a. CRITICAL governance — any one = automatic Red, and blocks a Green
+- 8-K Item **4.02** (non-reliance on previously issued financials / restatement in progress)
+- **Restatement** disclosed in the latest 10-K
+- **Auditor resignation or dismissal *with a reported disagreement / reportable event*** (8-K 4.01
+  where the filing discloses a disagreement or material weakness — not a routine re-tender)
+- **Late filing**: NT 10-K / NT 10-Q filed in the last 12 months
+- These are management/auditor telling you the numbers can't be trusted. Sets tier = **Red** on
+  their own; records `governance_flag=1` with a `critical` marker in `flag_details`.
+
+### 6b. SOFT governance — a normal contributing family, never auto-Red, never alone blocks Green
+- Routine **auditor change** (8-K 4.01) with **no** disclosed disagreement
+- **CFO turnover** (note repeat turnover — more interesting than a single change)
+- **Audit-committee-chair turnover**
+- Fires the `governance_flag` as ONE family toward the combination count (so 2 families incl. soft
+  governance → Yellow, 3 → Red, per the normal tier rules) — but does **not** by itself escalate to
+  Red the way 6a does. Record with a `soft` marker in `flag_details` so the diff/report can tell them apart.
 
 ### Why it matters
-These are the highest-signal events in forensic accounting. An 8-K 4.02 means management is telling you not to trust prior financials. An auditor leaving without a clean handoff is the auditor speaking through their feet.
+An 8-K 4.02 means management is telling you not to trust prior financials, and an auditor leaving
+mid-disagreement is the auditor speaking through their feet — those are the highest-signal events in
+forensic accounting (6a). A CFO rotating out or an audit firm re-tendered on price (6b) is worth
+noting but is everyday corporate housekeeping, not an integrity alarm.
 
 ---
 

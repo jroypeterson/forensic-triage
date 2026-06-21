@@ -59,9 +59,26 @@ WATCHLIST_FIELDS = [
     "sector_subgroup",
     "subsector",
     "core",
+    "filer_type",
     "added_date",
     "notes",
 ]
+
+
+def derive_filer_type(row: dict) -> str:
+    """domestic (10-K filer) vs foreign (20-F/IFRS filer).
+
+    The forensic rubric is built on 10-K disclosures (financial-statement notes,
+    MD&A). ADR / cross-listed foreign private issuers file a 20-F with different
+    structure and often IFRS, which the 10-K-based rubric cannot evaluate
+    cleanly — so they must be routed to manual review (Data Gap tier), NOT
+    silently screened as Green. We TAG rather than drop so coverage stays visible.
+    """
+    iso = (row.get("Country (ISO)", "") or "").strip().upper()
+    listing = (row.get("Listing Type", "") or "").strip().lower()
+    if (iso and iso != "USA") or "adr" in listing or "cross-listed" in listing:
+        return "foreign"
+    return "domestic"
 
 
 def load_existing_watchlist() -> dict[str, dict]:
@@ -115,6 +132,7 @@ def build_new_watchlist(
             "sector_subgroup": subgroup,
             "subsector": row.get("Subsector (JP)", "").strip(),
             "core": row.get("Core", "").strip(),
+            "filer_type": derive_filer_type(row),
             "added_date": prev["added_date"] if prev and prev.get("added_date") else today,
             "notes": prev.get("notes", "") if prev else "",
         }
@@ -165,6 +183,8 @@ def main() -> int:
     print(f"Total in new watchlist: {len(new_rows)}")
     for sg in sorted(by_subgroup):
         print(f"  {sg}: {by_subgroup[sg]}")
+    foreign = sum(1 for r in new_rows if r["filer_type"] == "foreign")
+    print(f"Foreign (20-F/ADR -> Data Gap manual review): {foreign} of {len(new_rows)}")
     print(f"Added: {len(added)}")
     print(f"Removed: {len(removed)}")
     print(f"Subgroup changes: {len(subgroup_changes)}")

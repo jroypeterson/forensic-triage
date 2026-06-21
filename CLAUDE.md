@@ -93,6 +93,16 @@ NOT score it Red (MASI, June run).
 
 When the user says "run forensic triage" or similar:
 
+### "A few each day" cadence (Path B, interactive)
+The full universe (~274 domestic names) is screened a **few at a time** across interactive
+sessions, not one big run. `python next_batch.py [-n 6]` is the daily driver: it prints the next
+batch of un-screened names (core-first → hc_services → medtech → general), the progress
+(`X/274 this cycle`), and the foreign Data-Gap count. A name is "done this cycle" once it has a
+`flags_history.csv` row dated ≥ the cycle-start (default `2026-06-20`, the recalibration baseline);
+bump `--cycle-start` to begin a fresh re-screen. Each session: run `next_batch.py`, screen that
+batch (Steps 1–5 below), append rows to `flags_history.csv`, write/append the day's report. Foreign
+filers never appear in the batch (they're Data Gap, not EDGAR-screened).
+
 ### Step 0: Sync watchlist
 Run `python sync_watchlist.py` first. Note any adds/removes/subgroup changes — new names get an automatic Yellow tier on their first appearance (no flag history to compare against, so flag them for a baseline read).
 

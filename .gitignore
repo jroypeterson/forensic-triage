@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 .claude/
 *.tmp.*
+
+# Path A: per-ticker fetched JSON (large, regenerable)
+data/fetched/

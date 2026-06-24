@@ -272,6 +272,16 @@ What this means for the trigger:
 - It cannot post to Slack via the connector — would need an incoming webhook for `#forensic-flags`
 - The trigger's first calibration run still produced an excellent AHCO Red-tier analysis using the fallback path, but missed the four most important notes (revenue recognition, debt covenants, goodwill detail, current legal proceedings)
 
+### ⚠ UPDATE 2026-06-21: Path A (unattended) is now being BUILT — supersedes the Path-B decision below
+JP chose to build **Path A** (unattended automation) after the recalibration was validated. See
+**`PATH_A_PLAN.md`** (codex-reviewed 2×) for the authoritative spec and **[[forensic-triage-system]]**
+memory for the build state. Architecture: **GitHub Actions cron + Anthropic-API tiering** (NOT the
+claude.ai trigger), hybrid data layer (paid Edgar REST key for statements/ratios/8-K + free
+`edgartools` lib for note bodies). Committed so far: `forensic_schema.py` + `forensic_tier.py`
+(deterministic false-Green guard) + 18 tests. Remaining: `edgar_fetch.py`, `tier_batch.py`,
+`notify.py`, the workflow, idempotency. The old claude.ai trigger `trig_…9Cd6` should be **disabled**
+once Path A ships.
+
 ### Decision (2026-06-20): Path B — interactive-only is the source of truth; disable the degraded trigger
 
 Reviewed (Codex + PROJECT_BRIEF §5): **Path B for v1.** Interactive runs are the ONLY authoritative

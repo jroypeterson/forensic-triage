@@ -14,12 +14,16 @@ bodies**) are MCP-only and the MCP **rejects API keys** (OAuth-only = interactiv
 `edgartools` library (direct SEC, free) gets ALL of that headlessly (verified: STAA 10-K full text
 incl. consigned-inventory note + structured statements + 8-K bodies + Form 4).
 
-**Critical correction (codex R1 #1/#6):** governance, 8-K item *bodies*, corporate-action codes
-(5.01/2.01/3.01), legal/FCA text, and MD&A/risk-factor text all come from **free `edgartools`**,
-NOT the paid REST — so a paid-REST outage can never hide a 4.02/NT/FCA and produce a false Green.
-The paid REST is used only for the clean **ratios + health score** (and as a *redundant* events
-cross-check + optional full-text search). If the paid REST is down, the run still fully evaluates
-governance/legal from the free library.
+**CORRECTION (2026-06-23):** the paid REST key actually reaches the **statement line items** too —
+`/companies/{cik}/income-statement` · `/balance-sheet` · `/cash-flow` · `/metrics` · `/ratios`
+(use the hyphenated direct paths; `/financials/*` 404s) + `/material-events` (8-K item codes). So the
+paid REST is the **primary** source for statements + ratios + 8-K item codes. The **ONLY** thing it
+can't do headlessly is **10-K note BODIES** (`edgar_notes` full text — MCP-only, key rejected). The
+free `edgartools` library is needed for **note bodies** (required for Red-tier quoting + several
+sector/note-backed checks) + 8-K item *bodies* (4.01-disagreement detail, corp-action context) +
+Form-4 detail, and serves as a **fallback for statements/8-K if the paid REST is down**. So a
+paid-REST outage degrades to free-edgartools-for-everything (incl. governance via 8-K bodies) — it
+can NOT silently hide a 4.02 and false-Green (codex R1 #1).
 
 | Rubric need | Source | If unavailable |
 |---|---|---|

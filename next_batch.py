@@ -9,9 +9,12 @@ what to screen, prioritised toward JP's coverage:
   3. then alphabetical
 
 A name is "done this cycle" once it has a flags_history row dated >= CYCLE_START
-(the recalibration baseline). Foreign filers (filer_type=foreign) are never
-screened by EDGAR — they belong to the Data Gap tier — so they're excluded here
-and reported separately.
+(the recalibration baseline) WITH status=complete (codex R2 idempotency). A row
+written by a transient fetch failure (status=fetch_failed) does NOT mark the name
+done — it retries next run. A structural Data Gap (foreign/stale/not-disclosed) is
+written status=complete and IS done. Older rows without a status column are treated
+as complete (back-compat). Foreign filers (filer_type=foreign) are never screened by
+EDGAR — they belong to the Data Gap tier — so they're excluded here and reported separately.
 
 Usage:
   python next_batch.py            # show the next batch (default 8) + progress
@@ -41,12 +44,21 @@ def load_watchlist() -> list[dict]:
 
 
 def screened_since(cycle_start: str) -> set[str]:
+    """Tickers DONE this cycle: a flags_history row dated >= cycle_start with status=complete.
+
+    A `status=fetch_failed` row does NOT count as done (transient failure retries next run).
+    Rows without a `status` column (legacy interactive runs) are treated as complete."""
     if not FLAGS_HISTORY_CSV.exists():
         return set()
     done: set[str] = set()
     with FLAGS_HISTORY_CSV.open(encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            if (row.get("run_date") or "") >= cycle_start and row.get("ticker"):
+        reader = csv.DictReader(f)
+        has_status = "status" in (reader.fieldnames or [])
+        for row in reader:
+            if (row.get("run_date") or "") < cycle_start or not row.get("ticker"):
+                continue
+            status = (row.get("status") or "").strip() if has_status else "complete"
+            if status in ("", "complete"):
                 done.add(row["ticker"].strip())
     return done
 

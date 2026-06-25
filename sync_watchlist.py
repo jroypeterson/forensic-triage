@@ -56,6 +56,7 @@ EXCLUDED_SECTORS = {"Biopharma"}
 WATCHLIST_FIELDS = [
     "ticker",
     "company_name",
+    "cik",
     "sector_subgroup",
     "subsector",
     "core",
@@ -63,6 +64,21 @@ WATCHLIST_FIELDS = [
     "added_date",
     "notes",
 ]
+
+
+def normalize_cik(raw: str) -> str:
+    """Normalize a Coverage Manager CIK to a zero-padded 10-digit string.
+
+    EDGAR APIs want a 10-digit zero-padded CIK. CM stores it variously
+    (with/without leading zeros, sometimes a 'CIK' prefix). Empty -> ''.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    s = s.upper().removeprefix("CIK").lstrip("0") or "0"
+    if not s.isdigit():
+        return ""
+    return s.zfill(10)
 
 
 def derive_filer_type(row: dict) -> str:
@@ -129,6 +145,7 @@ def build_new_watchlist(
         new_row = {
             "ticker": ticker,
             "company_name": row.get("Company Name", "").strip(),
+            "cik": normalize_cik(row.get("CIK", "")),
             "sector_subgroup": subgroup,
             "subsector": row.get("Subsector (JP)", "").strip(),
             "core": row.get("Core", "").strip(),

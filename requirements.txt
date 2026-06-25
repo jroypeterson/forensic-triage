@@ -1,0 +1,4 @@
+# Path A unattended forensic_triage — pinned (locally verified 2026-06-24, Python 3.14)
+edgartools==5.20.2
+requests==2.34.2
+anthropic==0.86.0

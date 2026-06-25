@@ -272,15 +272,34 @@ What this means for the trigger:
 - It cannot post to Slack via the connector — would need an incoming webhook for `#forensic-flags`
 - The trigger's first calibration run still produced an excellent AHCO Red-tier analysis using the fallback path, but missed the four most important notes (revenue recognition, debt covenants, goodwill detail, current legal proceedings)
 
-### ⚠ UPDATE 2026-06-21: Path A (unattended) is now being BUILT — supersedes the Path-B decision below
-JP chose to build **Path A** (unattended automation) after the recalibration was validated. See
-**`PATH_A_PLAN.md`** (codex-reviewed 2×) for the authoritative spec and **[[forensic-triage-system]]**
-memory for the build state. Architecture: **GitHub Actions cron + Anthropic-API tiering** (NOT the
-claude.ai trigger), hybrid data layer (paid Edgar REST key for statements/ratios/8-K + free
-`edgartools` lib for note bodies). Committed so far: `forensic_schema.py` + `forensic_tier.py`
-(deterministic false-Green guard) + 18 tests. Remaining: `edgar_fetch.py`, `tier_batch.py`,
-`notify.py`, the workflow, idempotency. The old claude.ai trigger `trig_…9Cd6` should be **disabled**
-once Path A ships.
+### ⚠ UPDATE 2026-06-24: Path A (unattended) is BUILT — pending Codex review + secrets, then enable
+JP greenlit and built **Path A** (unattended automation) after the recalibration was validated. See
+**`PATH_A_PLAN.md`** (codex-reviewed 2×) for the authoritative spec. Architecture: **GitHub Actions cron
++ Anthropic-API tiering** (NOT the claude.ai trigger), hybrid data layer (paid Edgar REST key for
+statements/ratios/8-K item codes + free `edgartools` PyPI lib for 10-K note bodies, with REST-down →
+edgartools fallback so an outage can't hide a 4.02).
+
+**Components (all committed-locally, 48 tests passing):**
+- `forensic_schema.py` + `forensic_tier.py` — deterministic false-Green guard + finalizer (pre-existing).
+- `edgar_fetch.py` — per-ticker hybrid fetch → `data/fetched/<TICKER>.json` (hard schema, NEVER raises;
+  `not_disclosed` vs `fetch_failed`; date-based staleness; `family_coverage` enum + `required_families_complete`).
+- `tier_batch.py` — Anthropic **Fable-5** structured-output per-family judge (Claude judges families,
+  NOT the final tier) → validate/retry fail-closed → `forensic_tier.finalize_tier()` deterministic
+  precedence + Green-gate. Run-level circuit breaker on broad outages. History migration (13→16 cols).
+- `notify.py` — #forensic-flags Block Kit + #status-reports heartbeat (context blocks use `elements[]`).
+- `run_unattended.py` — per-run orchestrator (next_batch → fetch → tier → history → report → notify).
+- `.github/workflows/forensic_triage.yml` — cron `30 18 * * 1-5`, `concurrency: forensic-triage`,
+  `contents: write`, rebase-before-push, `if: failure()` alarm.
+- `next_batch.py` — idempotency: done only when a `status=complete` flags_history row exists since
+  cycle-start; transient `fetch_failed` retries next run; structural Data Gap (foreign/stale/not-disclosed) is done.
+- `sync_watchlist.py` — now emits a `cik` column; `data/watchlist.csv` regenerated (301 rows, CIKs zero-padded).
+
+**Before enabling the cron:** (1) Codex review (per JP's forensic convention — `git push` was deliberately
+NOT done); (2) provision the 5 GH Actions secrets (`ANTHROPIC_API_KEY`, `EDGARTOOLS_API_KEY`, `EDGAR_IDENTITY`,
+`SLACK_WEBHOOK_STATUS_REPORTS`, and a NEW `SLACK_WEBHOOK_FORENSIC` for a #forensic-flags webhook that must be
+created); (3) one LIVE smoke (`python run_unattended.py --batch-size 2` with secrets set) to confirm a real
+EDGAR fetch + a real Fable-5 tiering call before flipping the cron on. The old claude.ai trigger `trig_…9Cd6`
+should be **disabled** once Path A is enabled.
 
 ### Decision (2026-06-20): Path B — interactive-only is the source of truth; disable the degraded trigger
 

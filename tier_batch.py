@@ -38,8 +38,13 @@ RUBRICS_DIR = ROOT / "rubrics"
 FETCHED_DIR = ROOT / "data" / "fetched"
 FLAGS_HISTORY_CSV = ROOT / "data" / "flags_history.csv"
 
-MODEL_ID = "claude-fable-5"  # MODEL_POLICY: Fable 5 for forensic_triage
-FALLBACK_MODEL = "claude-opus-4-8"
+# MODEL_POLICY designates Fable 5 for forensic_triage, but Fable 5 is API-access-gated
+# (this account's key 404s: "Claude Fable 5 is not available. Please use Opus 4.8") and is
+# above Opus-tier pricing + 30-day-retention-gated. Opus 4.8 is the API's own prescribed
+# alternative and the fleet default — strong on this structured, rubric-grounded judgment.
+# Revert to claude-fable-5 here if/when Fable 5 API access is granted to the account.
+MODEL_ID = "claude-opus-4-8"
+FALLBACK_MODEL = "claude-opus-4-7"
 MAX_VALIDATION_RETRIES = 2
 
 # Run-level circuit breaker: if more than this FRACTION of the batch could not be evaluated
@@ -204,14 +209,18 @@ def call_judge(rubric: str, record: dict, *, client=None, model: str = MODEL_ID)
         "Apply the rubric and return the structured per-family judgment."
     )
 
-    # Fable 5: no `thinking` param (always-on), no sampling params; structured output via
-    # output_config.format; effort low (deterministic, schema-constrained classification);
-    # server-side fallbacks opt-in by default so a refusal doesn't fail the run.
+    # Opus 4.8: adaptive thinking (the build was written for Fable 5's always-on thinking —
+    # preserve that on Opus 4.8 since forensic tiering is accuracy-critical; Opus omits thinking
+    # by default otherwise). No sampling params (they 400 on Opus 4.8). Structured output via
+    # output_config.format (GA on Opus 4.8 — no tool-use needed). max_tokens 16000 leaves room
+    # for thinking + the small JSON judgment without truncating (truncation -> max_tokens stop
+    # -> our fail-closed guard rejects it). Server-side fallbacks stay opt-in for a refusal.
     base_kwargs = dict(
         model=model,
-        max_tokens=4000,
+        max_tokens=16000,
         system=system,
         messages=[{"role": "user", "content": user}],
+        thinking={"type": "adaptive"},
         output_config={
             "effort": "low",
             "format": {"type": "json_schema", "schema": JUDGE_SCHEMA},

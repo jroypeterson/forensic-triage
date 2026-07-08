@@ -265,3 +265,46 @@ def test_8k_fetch_failure_blocks_governance(monkeypatch):
     _schema_keys_present(rec)
     assert rec["family_coverage"]["governance"] == "unavailable"
     assert rec["required_families_complete"] is False
+
+
+def test_normalize_statements_v1_rows_shape():
+    """The /v1 API returns statements as rows x periods with XBRL concepts; the
+    normalizer must pivot them into per-period line-item buckets (regression for the
+    2026-07 CI failures after the API moved under /v1)."""
+    income = {"statements": {"income_statement": {"rows": [
+        {"concept": "Revenues", "standard_concept": "Revenue",
+         "values": {"2025-12-31": 100, "2024-12-31": 90}, "is_abstract": False},
+        {"concept": "NetIncomeLoss", "standard_concept": "Net Income",
+         "values": {"2025-12-31": 10, "2024-12-31": 9}, "is_abstract": False},
+        {"concept": "SomethingAbstract", "standard_concept": "Revenue",
+         "values": {"2025-12-31": 999}, "is_abstract": True},
+    ]}}}
+    balance = {"statements": {"balance_sheet": {"rows": [
+        {"concept": "Assets", "standard_concept": "Total Assets",
+         "values": {"2025-12-31": 500}, "is_abstract": False},
+        {"concept": "InventoryNet", "standard_concept": None,
+         "values": {"2025-12-31": 50}, "is_abstract": False},
+    ]}}}
+    cashflow = {"statements": {"cash_flow": {"rows": [
+        {"concept": "NetCashProvidedByUsedInOperatingActivities", "standard_concept": None,
+         "values": {"2025-12-31": 12}, "is_abstract": False},
+        {"concept": "PaymentsToAcquirePropertyPlantAndEquipment", "standard_concept": None,
+         "values": {"2025-12-31": 4}, "is_abstract": False},
+    ]}}}
+    out = edgar_fetch._normalize_statements(income, balance, cashflow)
+    assert len(out) == 2  # two periods, newest first
+    latest = out[0]
+    assert latest["period"] == "2025-12-31"
+    assert latest["revenue"] == 100          # abstract row must NOT have overwritten this
+    assert latest["net_income"] == 10
+    assert latest["total_assets"] == 500
+    assert latest["inventory"] == 50
+    assert latest["cfo"] == 12
+    assert latest["capex"] == 4
+    assert out[1]["revenue"] == 90
+
+
+def test_normalize_statements_legacy_flat_shape_still_works():
+    income = {"data": [{"period": "2025", "revenue": 100, "net_income": 10}]}
+    out = edgar_fetch._normalize_statements(income, None, None)
+    assert out and out[0]["revenue"] == 100

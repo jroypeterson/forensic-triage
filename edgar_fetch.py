@@ -60,7 +60,9 @@ GOV_8K_ITEMS = {"4.01", "4.02", "5.02"}            # auditor change, non-relianc
 CORP_ACTION_8K_ITEMS = {"2.01", "3.01", "5.01"}    # acquisition/disposal, delisting, control change
 NT_FORMS = {"NT 10-K", "NT 10-Q", "NT10-K", "NT10-Q"}
 
-REST_BASE = "https://api.edgar.tools"  # documented hyphenated direct paths under /companies/{cik}/...
+# The REST API is versioned under /v1 (unversioned paths began returning 404 ~2026-07-01,
+# which silently pushed every run onto the edgartools fallback — the 07-01..07-07 CI failures).
+REST_BASE = "https://api.edgar.tools/v1"  # hyphenated direct paths under /v1/companies/{cik}/...
 
 
 # --------------------------------------------------------------------------------------
@@ -134,9 +136,29 @@ class RestClient:
     def _get(self, path: str):
         if not self.api_key:
             raise RuntimeError("no EDGARTOOLS_API_KEY -- REST unavailable")
-        resp = self._sess().get(f"{REST_BASE}{path}", timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        # Retry transient failures (429 / 5xx / connection errors) with backoff; a 4xx other
+        # than 429 is deterministic (bad path / bad CIK) and fails immediately. GH runners
+        # share egress IPs, so transient throttling is expected, not exceptional.
+        import time
+
+        import requests
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                resp = self._sess().get(f"{REST_BASE}{path}", timeout=30)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    resp.raise_for_status()
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.HTTPError as exc:
+                sc = exc.response.status_code if exc.response is not None else 0
+                if sc != 429 and sc < 500:
+                    raise  # deterministic client error -- retrying won't help
+                last_exc = exc
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                last_exc = exc
+            time.sleep(2 * (attempt + 1))
+        raise last_exc  # type: ignore[misc]
 
     def ratios(self, cik: str):
         return self._get(f"/companies/{cik}/ratios")
@@ -352,16 +374,74 @@ def fetch_ticker(
 # --------------------------------------------------------------------------------------
 # normalizers (defensive; each may be wrapped by _safe)
 # --------------------------------------------------------------------------------------
+# /v1 statement rows carry XBRL `concept` + curated `standard_concept`; map both onto the
+# compact line-item names the rubric uses. First match wins (rows are emitted totals-first).
+_V1_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
+    # our_key: ({us-gaap concepts, lowercased}, {standard_concept labels, lowercased})
+    "revenue": ({"revenues", "revenuefromcontractwithcustomerexcludingassessedtax",
+                 "salesrevenuenet"}, {"revenue"}),
+    "net_income": ({"netincomeloss", "profitloss"}, {"net income"}),
+    "gross_profit": ({"grossprofit"}, {"gross profit"}),
+    "cogs": ({"costofgoodsandservicessold", "costofrevenue", "costofsales"}, {"cost of revenue"}),
+    "depreciation_amortization": ({"depreciationdepletionandamortization",
+                                   "depreciationandamortization", "depreciation"}, set()),
+    "total_assets": ({"assets"}, {"total assets"}),
+    "inventory": ({"inventorynet"}, {"inventory"}),
+    "accounts_receivable": ({"accountsreceivablenetcurrent", "receivablesnetcurrent"},
+                            {"accounts receivable"}),
+    "goodwill": ({"goodwill"}, set()),
+    "short_term_debt": ({"longtermdebtcurrent", "shorttermborrowings", "debtcurrent",
+                         "commercialpaper"}, set()),
+    "long_term_debt": ({"longtermdebtnoncurrent", "longtermdebt"}, set()),
+    "deferred_revenue": ({"contractwithcustomerliabilitycurrent", "contractwithcustomerliability",
+                          "deferredrevenuecurrent"}, set()),
+    "cfo": ({"netcashprovidedbyusedinoperatingactivities",
+             "netcashprovidedbyusedinoperatingactivitiescontinuingoperations"},
+            {"operating cash flow"}),
+    "capex": ({"paymentstoacquirepropertyplantandequipment",
+               "paymentstoacquireproductiveassets"}, {"capital expenditure", "capex"}),
+}
+
+
+def _absorb_v1(payload, keys: list[str], periods: dict[str, dict]) -> bool:
+    """Absorb the /v1 rows-x-periods shape. Returns True if this payload WAS /v1-shaped
+    (regardless of how many keys matched), so the caller can skip the legacy path."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("statements"), dict):
+        return False
+    wanted = {k: _V1_CONCEPT_MAP[k] for k in keys if k in _V1_CONCEPT_MAP}
+    for stmt in payload["statements"].values():
+        rows = stmt.get("rows") if isinstance(stmt, dict) else None
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or row.get("is_abstract") or row.get("is_dimension"):
+                continue
+            concept = str(row.get("concept") or "").lower()
+            std = str(row.get("standard_concept") or "").lower()
+            values = row.get("values")
+            if not isinstance(values, dict):
+                continue
+            for key, (concepts, stds) in wanted.items():
+                if concept in concepts or (std and std in stds):
+                    for period, val in values.items():
+                        if val is None:
+                            continue
+                        bucket = periods.setdefault(str(period), {"period": str(period)})
+                        bucket.setdefault(key, val)  # first match wins (totals emitted first)
+    return True
+
+
 def _normalize_statements(income, balance, cashflow) -> list:
     """Fold the three REST statement payloads into a compact per-period list.
 
-    REST shapes vary; we only need the line items the rubric uses. Best-effort: we keep
-    whatever periods we can align and tolerate missing concepts.
+    Handles both the /v1 rows-x-periods shape (current) and the legacy flat row shape;
+    we only need the line items the rubric uses. Best-effort: keep whatever periods we
+    can align and tolerate missing concepts.
     """
     out: list[dict] = []
     periods: dict[str, dict] = {}
 
     def absorb(payload, keys):
+        if _absorb_v1(payload, keys, periods):
+            return
         if not isinstance(payload, dict):
             return
         rows = payload.get("data") or payload.get("statements") or payload.get("periods") or []

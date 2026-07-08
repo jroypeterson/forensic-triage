@@ -308,3 +308,36 @@ def test_normalize_statements_legacy_flat_shape_still_works():
     income = {"data": [{"period": "2025", "revenue": 100, "net_income": 10}]}
     out = edgar_fetch._normalize_statements(income, None, None)
     assert out and out[0]["revenue"] == 100
+
+
+def test_income_only_fetch_cannot_complete_cashflow_and_balance_families():
+    """codex 2026-07-08: income succeeding while balance/cash-flow FAIL must not
+    mark accruals/capex/balance_sheet/leverage complete (false-Green vector)."""
+    rec = edgar_fetch._empty_record("TST", "0000000001", "t")
+    rec["statements"]["annual"] = [{"period": "2025-12-31", "revenue": 100}]
+    rec["_stmt_ok"] = {"income": True, "balance": False, "cashflow": False}
+    rec["_events_8k_fetched"] = True
+    for topic in edgar_fetch.NOTE_TOPICS:
+        rec["notes"][topic] = {"status": "present", "text": "x"}
+    rec["staleness"] = {"is_stale": False, "reason": "fresh"}
+    cov = edgar_fetch._classify_coverage(rec, "general")
+    assert cov["accruals"] == "partial"       # no cash-flow -> no CFO
+    assert cov["capex"] == "partial"          # no cash-flow
+    assert cov["balance_sheet"] == "partial"  # no balance sheet
+    assert cov["leverage"] == "partial"       # no balance sheet
+    assert cov["revenue"] == "complete"       # income DID come back
+
+
+def test_all_statements_ok_still_completes_families():
+    rec = edgar_fetch._empty_record("TST", "0000000001", "t")
+    rec["statements"]["annual"] = [{"period": "2025-12-31", "revenue": 100, "cfo": 5}]
+    rec["_stmt_ok"] = {"income": True, "balance": True, "cashflow": True}
+    rec["_events_8k_fetched"] = True
+    for topic in edgar_fetch.NOTE_TOPICS:
+        rec["notes"][topic] = {"status": "present", "text": "x"}
+    rec["staleness"] = {"is_stale": False, "reason": "fresh"}
+    cov = edgar_fetch._classify_coverage(rec, "general")
+    assert cov["accruals"] == "complete"
+    assert cov["capex"] == "complete"
+    assert cov["balance_sheet"] == "complete"
+    assert cov["leverage"] == "complete"

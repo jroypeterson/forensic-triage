@@ -223,7 +223,19 @@ def _classify_coverage(rec: dict, subgroup: str) -> dict:
     # balance-sheet (inventory/AR/goodwill) and leverage (debt) all need line items. Requiring
     # only ratios here would let an otherwise-clean domestic name go Green with no statements
     # actually fetched (codex P1). Require real statements; ratios are supplementary.
+    #
+    # PER-STATEMENT granularity (codex 2026-07-08): a nonempty annual list proves only
+    # that SOME statement endpoint mapped. If income succeeded but balance-sheet/cash-flow
+    # failed, accruals (needs CFO), capex, balance_sheet and leverage would all have been
+    # marked complete off income data alone — a false-Green vector. Each family now also
+    # requires its OWN source statement(s) to have been fetched (rec['_stmt_ok'], set by
+    # fetch_ticker; the edgartools financials fallback sets all three, preserving its
+    # original coarse semantics).
+    stmt_ok = rec.get("_stmt_ok") or {}
     have_statements = bool(rec["statements"]["annual"])
+    have_income = have_statements and bool(stmt_ok.get("income"))
+    have_balance = have_statements and bool(stmt_ok.get("balance"))
+    have_cashflow = have_statements and bool(stmt_ok.get("cashflow"))
     have_8k = isinstance(rec["events_8k"], list) and (
         rec.get("_events_8k_fetched") is True
     )
@@ -236,13 +248,17 @@ def _classify_coverage(rec: dict, subgroup: str) -> dict:
             return False
         return all(s in ("present", "not_disclosed") for s in statuses)
 
-    # Financial families lean on statements.
-    fin_state = "complete" if have_statements else "unavailable"
-    cov["accruals"] = fin_state
-    cov["revenue"] = "complete" if (have_statements and note_ok("Revenue", "Significant Accounting Policies")) else ("partial" if have_statements else "unavailable")
-    cov["capex"] = fin_state
-    cov["balance_sheet"] = "complete" if (have_statements and note_ok("Inventory", "Goodwill")) else ("partial" if have_statements else "unavailable")
-    cov["leverage"] = "complete" if (have_statements and note_ok("Debt")) else ("partial" if have_statements else "unavailable")
+    # Financial families lean on their OWN statements (see note above).
+    cov["accruals"] = "complete" if (have_income and have_cashflow) else (
+        "partial" if have_statements else "unavailable")
+    cov["revenue"] = "complete" if (have_income and note_ok("Revenue", "Significant Accounting Policies")) else (
+        "partial" if have_statements else "unavailable")
+    cov["capex"] = "complete" if have_cashflow else (
+        "partial" if have_statements else "unavailable")
+    cov["balance_sheet"] = "complete" if (have_balance and note_ok("Inventory", "Goodwill")) else (
+        "partial" if have_statements else "unavailable")
+    cov["leverage"] = "complete" if (have_balance and note_ok("Debt")) else (
+        "partial" if have_statements else "unavailable")
 
     # Governance: needs the 8-K feed (item codes). If neither REST nor edgartools delivered it -> unavailable.
     cov["governance"] = "complete" if have_8k else "unavailable"
@@ -327,6 +343,13 @@ def fetch_ticker(
             lambda: _normalize_statements(income, balance, cashflow), errors,
             "normalize:statements", default=[],
         ) or []
+        # Which statements actually answered — coverage classification requires each
+        # family's own source statement, not just "some statement" (codex 2026-07-08).
+        rec["_stmt_ok"] = {
+            "income": income is not None,
+            "balance": balance is not None,
+            "cashflow": cashflow is not None,
+        }
 
     rest_events = _safe(lambda: rest.material_events(cik), errors, "rest:material-events")
     events_fetched = False
@@ -350,6 +373,9 @@ def fetch_ticker(
                        "edgartools:statements-fallback", default=[])
             if fb:
                 rec["statements"]["annual"] = fb
+                # The financials object spans all three statements — coarse by
+                # design (preserves the fallback's original semantics).
+                rec["_stmt_ok"] = {"income": True, "balance": True, "cashflow": True}
         # fallback 8-K feed if REST events were unavailable (so an outage can't hide a 4.02)
         if not events_fetched:
             fb_events = _safe(lambda: _edgartools_events(company), errors,
@@ -368,6 +394,7 @@ def fetch_ticker(
     rec["required_families_complete"] = _required_complete(rec["family_coverage"], subgroup)
 
     rec.pop("_events_8k_fetched", None)
+    rec.pop("_stmt_ok", None)
     return rec
 
 

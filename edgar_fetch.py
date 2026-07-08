@@ -343,13 +343,10 @@ def fetch_ticker(
             lambda: _normalize_statements(income, balance, cashflow), errors,
             "normalize:statements", default=[],
         ) or []
-        # Which statements actually answered — coverage classification requires each
-        # family's own source statement, not just "some statement" (codex 2026-07-08).
-        rec["_stmt_ok"] = {
-            "income": income is not None,
-            "balance": balance is not None,
-            "cashflow": cashflow is not None,
-        }
+        # Which statements actually CONTRIBUTED mapped line items — a 200 with an
+        # empty/unmappable body must not count as coverage (codex R2 2026-07-08:
+        # `is not None` alone preserved the false-Green vector for `{}` responses).
+        rec["_stmt_ok"] = _stmt_ok_from(rec["statements"]["annual"], income, balance, cashflow)
 
     rest_events = _safe(lambda: rest.material_events(cik), errors, "rest:material-events")
     events_fetched = False
@@ -428,6 +425,29 @@ _V1_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "capex": ({"paymentstoacquirepropertyplantandequipment",
                "paymentstoacquireproductiveassets"}, {"capital expenditure", "capex"}),
 }
+
+
+# Line-item keys per source statement — used to decide whether a statement
+# actually contributed data (not merely returned HTTP 200 with an empty body).
+_INCOME_KEYS = {"revenue", "net_income", "gross_profit", "cogs"}
+_BALANCE_KEYS = {"total_assets", "inventory", "accounts_receivable", "goodwill",
+                 "total_debt", "short_term_debt", "long_term_debt", "deferred_revenue"}
+_CASHFLOW_KEYS = {"cfo", "capex"}
+
+
+def _stmt_ok_from(annual: list, income, balance, cashflow) -> dict:
+    """Per-statement usable-coverage flags: endpoint answered AND at least one
+    of its line items actually mapped into the normalized periods (codex R2:
+    an empty `{}` 200 must classify like a failure, not like coverage)."""
+    present: set[str] = set()
+    for p in annual or []:
+        if isinstance(p, dict):
+            present.update(p.keys())
+    return {
+        "income": income is not None and bool(present & _INCOME_KEYS),
+        "balance": balance is not None and bool(present & _BALANCE_KEYS),
+        "cashflow": cashflow is not None and bool(present & _CASHFLOW_KEYS),
+    }
 
 
 def _absorb_v1(payload, keys: list[str], periods: dict[str, dict]) -> bool:

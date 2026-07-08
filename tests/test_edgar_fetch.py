@@ -341,3 +341,16 @@ def test_all_statements_ok_still_completes_families():
     assert cov["capex"] == "complete"
     assert cov["balance_sheet"] == "complete"
     assert cov["leverage"] == "complete"
+
+
+def test_stmt_ok_requires_mapped_line_items_not_just_http_200():
+    """codex R2 2026-07-08: an empty {} response (HTTP 200, no rows) must not
+    count as statement coverage."""
+    annual = [{"period": "2025-12-31", "revenue": 100, "net_income": 10}]
+    ok = edgar_fetch._stmt_ok_from(annual, income={}, balance={}, cashflow={})
+    assert ok["income"] is True        # income keys actually mapped
+    assert ok["balance"] is False      # endpoint answered but nothing mapped
+    assert ok["cashflow"] is False
+    # endpoint failed outright -> False regardless of keys
+    ok2 = edgar_fetch._stmt_ok_from(annual, income=None, balance={}, cashflow={})
+    assert ok2["income"] is False

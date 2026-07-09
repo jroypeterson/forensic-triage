@@ -272,6 +272,9 @@ What this means for the trigger:
 - It cannot post to Slack via the connector — would need an incoming webhook for `#forensic-flags`
 - The trigger's first calibration run still produced an excellent AHCO Red-tier analysis using the fallback path, but missed the four most important notes (revenue recognition, debt covenants, goodwill detail, current legal proceedings)
 
+### ⚠ UPDATE 2026-07-08: Edgar-Tools REST moved under /v1 (fixed) + per-statement coverage
+The paid REST API versioned its paths (~2026-07-01): unversioned `/companies/{cik}/...` now 404s; use `https://api.edgar.tools/v1/...` (`REST_BASE` in `edgar_fetch.py`). The 07-01..07-07 CI failures were this + SEC throttling the edgartools fallback tripping the circuit breaker; `RestClient._get` now retries transient 429/5xx. The /v1 statement payloads are rows×periods XBRL (`_absorb_v1` normalizer). **False-Green hardening (codex 2x):** each financial family's coverage now requires its OWN source statement to have contributed mapped line items (`_stmt_ok_from` — an income-only or empty-`{}` fetch can no longer mark accruals/capex/balance_sheet/leverage complete). If all endpoints 404 again, probe `/v1` vs `/v2` before debugging code.
+
 ### ⚠ UPDATE 2026-06-24: Path A (unattended) is BUILT — pending Codex review + secrets, then enable
 JP greenlit and built **Path A** (unattended automation) after the recalibration was validated. See
 **`PATH_A_PLAN.md`** (codex-reviewed 2×) for the authoritative spec. Architecture: **GitHub Actions cron

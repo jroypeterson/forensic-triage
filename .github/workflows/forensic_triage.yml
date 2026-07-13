@@ -7,7 +7,7 @@ name: Forensic Triage (unattended)
 
 on:
   schedule:
-    # 18:30 UTC weekdays (~13:30 ET winter / 14:30 ET summer — after the SEC filing day).
+    # 18:30 UTC daily (~13:30 ET winter / 14:30 ET summer — after the SEC filing day).
     - cron: '30 18 * * *'
   workflow_dispatch:
     inputs:

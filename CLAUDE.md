@@ -291,7 +291,7 @@ edgartools fallback so an outage can't hide a 4.02).
   precedence + Green-gate. Run-level circuit breaker on broad outages. History migration (13→16 cols).
 - `notify.py` — #forensic-flags Block Kit + #status-reports heartbeat (context blocks use `elements[]`).
 - `run_unattended.py` — per-run orchestrator (next_batch → fetch → tier → history → report → notify).
-- `.github/workflows/forensic_triage.yml` — cron `30 18 * * 1-5`, `concurrency: forensic-triage`,
+- `.github/workflows/forensic_triage.yml` — cron `30 18 * * *` (daily since 2026-07-13; was weekdays), `concurrency: forensic-triage`,
   `contents: write`, rebase-before-push, `if: failure()` alarm.
 - `next_batch.py` — idempotency: done only when a `status=complete` flags_history row exists since
   cycle-start; transient `fetch_failed` retries next run; structural Data Gap (foreign/stale/not-disclosed) is done.

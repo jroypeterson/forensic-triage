@@ -1,11 +1,11 @@
 """Pick the next batch of names to screen — the daily "a few each day" driver.
 
-Path B (interactive) chips through the ~274 domestic watchlist names a few at a
+Path B (interactive) chips through the domestic watchlist names a few at a
 time. This deterministic helper picks the next batch so each session knows exactly
-what to screen, prioritised toward JP's coverage:
+what to screen, prioritised by JP's coverage rings:
 
-  1. core=Y first (names JP analytically covers)
-  2. then by subgroup: hc_services -> medtech -> general (HC focus)
+  1. by cohort: portfolio -> researching -> core -> sp500 -> other
+  2. then by subgroup within a cohort: hc_services -> medtech -> general (HC focus)
   3. then alphabetical
 
 A name is "done this cycle" once it has a flags_history row dated >= CYCLE_START
@@ -26,6 +26,8 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+
+import coverage_cohorts as cc
 
 ROOT = Path(__file__).parent
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
@@ -63,10 +65,16 @@ def screened_since(cycle_start: str) -> set[str]:
     return done
 
 
-def sort_key(row: dict):
-    core_rank = 0 if (row.get("core", "").strip().upper() == "Y") else 1
+def row_cohort(row: dict, rosters: dict[str, set[str]]) -> str:
+    """Baked `cohort` column (CI-safe) if present, else compute live from rosters."""
+    c = (row.get("cohort") or "").strip()
+    return c if c else cc.cohort_for(row.get("ticker", ""), rosters)
+
+
+def sort_key(row: dict, rosters: dict[str, set[str]]):
+    cohort_rank = cc.COHORT_RANK.get(row_cohort(row, rosters), 99)
     sg_rank = SUBGROUP_ORDER.get(row.get("sector_subgroup", ""), 9)
-    return (core_rank, sg_rank, row.get("ticker", ""))
+    return (cohort_rank, sg_rank, row.get("ticker", ""))
 
 
 def main() -> int:
@@ -77,12 +85,13 @@ def main() -> int:
     args = p.parse_args()
 
     watchlist = load_watchlist()
+    rosters = cc.load_rosters()
     domestic = [r for r in watchlist if r.get("filer_type", "domestic") != "foreign"]
     foreign = [r for r in watchlist if r.get("filer_type") == "foreign"]
     done = screened_since(args.cycle_start)
 
     pending = [r for r in domestic if r["ticker"].strip() not in done]
-    pending.sort(key=sort_key)
+    pending.sort(key=lambda r: sort_key(r, rosters))
 
     n_dom = len(domestic)
     n_done = sum(1 for r in domestic if r["ticker"].strip() in done)
@@ -91,14 +100,14 @@ def main() -> int:
     print(f"Foreign (Data Gap, not EDGAR-screened): {len(foreign)}")
     print()
     if not pending:
-        print("Cycle complete — every domestic name screened since cycle start. Bump --cycle-start to re-screen.")
+        print("Cycle complete - every domestic name screened since cycle start. Bump --cycle-start to re-screen.")
         return 0
 
     batch = pending[:args.batch_size]
     print(f"Next batch ({len(batch)}):")
     for r in batch:
-        core = "core" if r.get("core", "").strip().upper() == "Y" else "    "
-        print(f"  {r['ticker']:<6} [{core}] {r['sector_subgroup']:<12} {r.get('company_name','')}")
+        cohort = row_cohort(r, rosters)
+        print(f"  {r['ticker']:<6} [{cohort:<11}] {r['sector_subgroup']:<12} {r.get('company_name','')}")
     return 0
 
 

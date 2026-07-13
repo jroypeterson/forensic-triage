@@ -8,3 +8,6 @@ __pycache__/
 
 # Path A: per-ticker fetched JSON (large, regenerable)
 data/fetched/
+
+# SEC ticker->CIK map cache (large, regenerable)
+data/.sec_company_tickers.json

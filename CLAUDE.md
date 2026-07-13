@@ -9,11 +9,19 @@ Claude-driven forensic accounting screen. Surfaces companies in the coverage lis
 ```
 forensic_triage/
   CLAUDE.md                       # This file — workflow instructions
-  sync_watchlist.py               # Sync watchlist from Coverage Manager master list
+  sync_watchlist.py               # Sync watchlist from CM master + S&P 500 expansion ring
+  coverage_cohorts.py             # Cohort partition (Portfolio>Researching>Core>S&P 500)
+  next_batch.py                   # Next-batch picker (cohort-priority order)
+  dashboard.py                    # Coverage dashboard: Slack digest + HTML + day-over-day
   data/
-    watchlist.csv                 # Companies tracked (synced from Coverage Manager)
+    watchlist.csv                 # Companies tracked (CM + S&P 500; cohort baked in)
+    cohort_totals.json            # Disjoint roster sizes (CI-safe; for the excluded count)
     flags_history.csv             # Per-company flag state per run (for diffs)
     ratios_latest.csv             # Latest computed ratios snapshot
+  reports/
+    coverage_dashboard.html       # Rendered coverage dashboard (HTML)
+  .health/
+    dashboard_history.json        # Day-over-day snapshots for the digest delta
   rubrics/
     general.md                    # Universal forensic checks (any sector)
     healthcare_services.md        # Hospitals, providers, payers, PBMs, distributors
@@ -39,11 +47,59 @@ The watchlist is **derived from** `../Coverage Manager/data/coverage_universe_ti
 
 ### Sync command
 ```
-python sync_watchlist.py            # write
+python sync_watchlist.py            # write (CM universe + S&P 500 expansion ring)
 python sync_watchlist.py --dry-run  # report only
+python sync_watchlist.py --no-sp500 # CM universe only (skip the S&P 500 ring)
 ```
 
 Run this **before** every triage. It is Step 0 of the weekly workflow below.
+
+### S&P 500 expansion ring (2026-07-13)
+
+The watchlist is the CM universe **plus the S&P 500** as a 4th, lowest-priority coverage
+ring (JP's request: "portfolio, researching, core coverage, and then broader S&P 500").
+`sync_watchlist.py` unions in the S&P 500 names CM doesn't already carry (`sp500 − cm_master`,
+from `../sigma-alert/sources/sp500.txt`), resolving each CIK from SEC's free
+`company_tickers.json` (cached at `data/.sec_company_tickers.json`, gitignored). These rows
+get `source=sp500`, `sector_subgroup=general`, `filer_type=domestic`. Names with no SEC CIK
+are skipped loudly (can't EDGAR-screen). Result: ~700 names (~303 CM + ~394 S&P 500).
+
+**Cohort is baked into `watchlist.csv`.** Each row carries a `cohort` column
+(`portfolio|researching|core|sp500|other`, disjoint by priority via `coverage_cohorts.py`),
+and `sync` also writes `data/cohort_totals.json` (disjoint roster sizes). Both are committed
+so CI — which has **no CM/sigma sibling repos** — reads cohorts from the watchlist, not live.
+`next_batch.py` and `dashboard.py` read the baked `cohort` with a live-roster fallback.
+
+## Coverage Dashboard (`dashboard.py`)
+
+Forensic triage is a **standing process**, not a one-shot task — names are screened a few per
+day and this dashboard shows coverage + freshness across the four rings so progress (and gaps)
+stay visible. Modeled on the transcripts daily digest.
+
+```
+python dashboard.py                 # plaintext to stdout (dry-run; no post, no snapshot)
+python dashboard.py --html          # + write reports/coverage_dashboard.html
+python dashboard.py --post          # post Slack digest (#forensic-flags) + save day-over-day snapshot
+python dashboard.py --post --html   # both (what the daily workflow runs)
+python dashboard.py --per-day 6 --cycle-start 2026-06-20
+```
+
+- **Rings** (disjoint, priority order): Portfolio → Researching → Core coverage → S&P 500
+  (+ `other` residual). A name counts under its highest ring only.
+- **"Screened"** = a `flags_history.csv` row dated ≥ cycle-start with `status=complete` (the
+  exact done-definition `next_batch.py` uses). Per ring: screened/total, 🔴/🟡 tallies, pending,
+  and the foreign (Data-Gap) count that can't be EDGAR-screened.
+- **Honest denominator:** the dashboard surfaces `Not screenable (N biopharma-excluded …)` per
+  ring — forensic skips biopharma at sync, so e.g. ~10 Portfolio names aren't screened and that
+  gap is shown, never hidden.
+- **Day-over-day** delta persisted to `.health/dashboard_history.json` (saved on `--post`).
+- **ETA** projects the full-sweep finish at the batch rate.
+
+**Cadence:** the daily Path-A workflow (`forensic_triage.yml`, 18:30 UTC) runs
+`dashboard.py --post --html` after the screen step (`continue-on-error` — a digest failure can
+never fail the screen). **Activation gap:** the Slack post needs a **new `#forensic-flags`
+webhook** in `SLACK_WEBHOOK_FORENSIC` (same secret Path A already expects). Until it's created,
+the digest writes the HTML + prints, but the Slack post no-ops. The HTML is committed each run.
 
 ## Core Principle: Flag Families, Not Scores
 

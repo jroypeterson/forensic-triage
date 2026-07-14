@@ -297,8 +297,9 @@ def _excluded_note(data: dict) -> str:
             parts.append(f"{cc.COHORT_LABEL[c]} {n}")
     if not parts:
         return ""
-    return (f"Not screenable ({data['totals']['excluded']} biopharma-excluded / "
-            f"not-in-universe — forensic skips biopharma): " + " · ".join(parts))
+    return (f"Not screenable ({data['totals']['excluded']} small-cap biopharma / "
+            f"not-in-universe — forensic screens large-cap (S&P 500) biopharma only): "
+            + " · ".join(parts))
 
 
 def to_plaintext(data: dict) -> str:
@@ -461,7 +462,7 @@ footer{{color:var(--dim);font-size:12px;margin-top:24px}}
 <th class="num">🔴</th><th class="num">🟡</th><th class="num">Pending</th><th class="num">Data-gap</th></tr>
 {rows}</table>
 {flagged_section}
-<footer>Rings are disjoint, priority order: Portfolio → Researching → Core → S&amp;P 500. “Screened” = a completed forensic run since the cycle start. Data-gap = foreign filers (20-F/IFRS) the 10-K rubric can’t evaluate. Generated {generated_at}.</footer>
+<footer>Rings are disjoint, priority order: Portfolio → Researching → Core → S&amp;P 500. “Screened” = a completed forensic run since the cycle start. Data-gap = foreign filers (20-F/IFRS) the 10-K rubric can’t evaluate. Biopharma is screened only when large-cap (S&amp;P 500). Generated {generated_at}.</footer>
 </div></body></html>"""
 
 

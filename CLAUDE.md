@@ -35,7 +35,12 @@ The watchlist is **derived from** `../Coverage Manager/data/coverage_universe_ti
 
 ### Sync rules (`sync_watchlist.py`)
 - Only US-listed names (must have a CIK — EDGAR is the data source)
-- Excludes Biopharma (forensic triage de-prioritizes biotech accounting)
+- **Biopharma: large-cap only** (2026-07-13, JP). Biopharma is screened only when it's in the
+  S&P 500 (a large-cap proxy) — big pharma (LLY/PFE/MRK…) has normal financials the rubric
+  handles; small/pre-revenue biotech accruals/revenue rules are noise, so non-S&P-500 biopharma
+  stays excluded. `LARGE_CAP_ONLY_SECTORS={"Biopharma"}` gates it; included ones route to the
+  `general` rubric (no biopharma-specific rubric yet). The dashboard's "Not screenable" line
+  shows the remaining small-cap-biopharma gap.
 - Maps Coverage Manager `Sector (JP)` → forensic `sector_subgroup`:
   - `Healthcare Services` → `hc_services`
   - `MedTech`, `Life Science Tools` → `medtech`

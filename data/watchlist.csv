@@ -1,5 +1,6 @@
 ticker,company_name,cik,sector_subgroup,subsector,core,filer_type,added_date,notes,source,cohort
 AAPL,Apple Inc.,0000320193,general,,Y,domestic,2026-04-07,,cm,portfolio
+ABBV,AbbVie Common Stock,0001551152,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 ABNB,,0001559720,general,,,domestic,2026-07-13,,sp500,sp500
 ACGL,,0000947484,general,,,domestic,2026-07-13,,sp500,sp500
 ACN,,0001467373,general,,,domestic,2026-07-13,,sp500,sp500
@@ -24,6 +25,7 @@ AMAT,,0000006951,general,,,domestic,2026-07-13,,sp500,sp500
 AMCR,,0001748790,general,,,domestic,2026-07-13,,sp500,sp500
 AMD,,0000002488,general,,,domestic,2026-07-13,,sp500,sp500
 AME,,0001037868,general,,,domestic,2026-07-13,,sp500,sp500
+AMGN,Amgen Inc,0000318154,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 AMP,,0000820027,general,,Y,domestic,2026-07-13,,sp500,core
 AMPL,Amplitude Inc,0001866692,general,,,domestic,2026-04-07,,cm,other
 AMT,,0001053507,general,,,domestic,2026-07-13,,sp500,sp500
@@ -56,6 +58,7 @@ BBY,,0000764478,general,,,domestic,2026-07-13,,sp500,sp500
 BEN,,0000038777,general,,,domestic,2026-07-13,,sp500,sp500
 BF-B,,0000014693,general,,,domestic,2026-07-13,,sp500,sp500
 BG,,0001996862,general,,,domestic,2026-07-13,,sp500,sp500
+BIIB,Biogen Inc,0000875045,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 BILL,BILL Holdings Inc,0001786352,general,,,domestic,2026-04-07,,cm,other
 BKNG,,0001075531,general,,,domestic,2026-07-13,,sp500,sp500
 BKR,,0001701605,general,,,domestic,2026-07-13,,sp500,sp500
@@ -63,6 +66,7 @@ BL,Blackline Inc,0001666134,general,,,domestic,2026-04-07,,cm,other
 BLDR,,0001316835,general,,,domestic,2026-07-13,,sp500,sp500
 BLK,,0002012383,general,,,domestic,2026-07-13,,sp500,sp500
 BLND,Blend Labs Inc,0001855747,general,,,domestic,2026-04-07,,cm,other
+BMY,Bristol-Myers Squibb Company,0000014272,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 BNY,,0001390777,general,,,domestic,2026-07-13,,sp500,sp500
 BOX,Box Inc,0001372612,general,,,domestic,2026-04-07,,cm,other
 BR,,0001383312,general,,,domestic,2026-07-13,,sp500,sp500
@@ -197,6 +201,7 @@ GDDY,,0001609711,general,,,domestic,2026-07-13,,sp500,sp500
 GE,,0000040545,general,,,domestic,2026-07-13,,sp500,sp500
 GEN,Gen Digital Inc,0000849399,general,,,domestic,2026-04-07,,cm,sp500
 GEV,,0001996810,general,,,domestic,2026-07-13,,sp500,sp500
+GILD,Gilead Sciences Inc,0000882095,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 GIS,,0000040704,general,,,domestic,2026-07-13,,sp500,sp500
 GL,,0000320335,general,,,domestic,2026-07-13,,sp500,sp500
 GLW,,0000024741,general,,,domestic,2026-07-13,,sp500,sp500
@@ -232,6 +237,7 @@ IBM,,0000051143,general,,,domestic,2026-07-13,,sp500,sp500
 ICE,,0001571949,general,,,domestic,2026-07-13,,sp500,sp500
 IEX,,0000832101,general,,,domestic,2026-07-13,,sp500,sp500
 IFF,,0000051253,general,,,domestic,2026-07-13,,sp500,sp500
+INCY,Incyte Corp,0000879169,general,Biotech,,domestic,2026-07-13,,cm,sp500
 INTC,,0000050863,general,,,domestic,2026-07-13,,sp500,sp500
 INTU,,0000896878,general,,,domestic,2026-07-13,,sp500,sp500
 INVH,,0001687229,general,,,domestic,2026-07-13,,sp500,sp500
@@ -266,6 +272,7 @@ LEN,,0000920760,general,,,domestic,2026-07-13,,sp500,sp500
 LHX,,0000202058,general,,,domestic,2026-07-13,,sp500,sp500
 LII,,0001069202,general,,,domestic,2026-07-13,,sp500,sp500
 LITE,,0001633978,general,,,domestic,2026-07-13,,sp500,sp500
+LLY,Eli Lilly And Co,0000059478,general,Large Pharma,,domestic,2026-07-13,,cm,portfolio
 LMT,,0000936468,general,,,domestic,2026-07-13,,sp500,sp500
 LNT,,0000352541,general,,,domestic,2026-07-13,,sp500,sp500
 LOW,,0000060667,general,,,domestic,2026-07-13,,sp500,sp500
@@ -295,6 +302,8 @@ MO,,0000764180,general,,,domestic,2026-07-13,,sp500,sp500
 MOS,,0001285785,general,,,domestic,2026-07-13,,sp500,sp500
 MPC,,0001510295,general,,,domestic,2026-07-13,,sp500,sp500
 MPWR,,0001280452,general,,,domestic,2026-07-13,,sp500,sp500
+MRK,Merck & Co Inc,0000310158,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
+MRNA,Moderna Inc,0001682852,general,Biotech,,domestic,2026-07-13,,cm,sp500
 MRSH,,0000062709,general,,,domestic,2026-07-13,,sp500,sp500
 MRVL,,0001835632,general,,,domestic,2026-07-13,,sp500,sp500
 MS,,0000895421,general,,,domestic,2026-07-13,,sp500,sp500
@@ -345,6 +354,7 @@ PCTY,Paylocity Holding Corp,0001591698,general,,,domestic,2026-04-07,,cm,other
 PD,Pagerduty Inc,0001568100,general,,,domestic,2026-04-07,,cm,other
 PEG,,0000788784,general,,,domestic,2026-07-13,,sp500,sp500
 PEP,,0000077476,general,,,domestic,2026-07-13,,sp500,sp500
+PFE,Pfizer Inc,0000078003,general,Large Pharma,,domestic,2026-07-13,,cm,sp500
 PFG,,0001126328,general,,,domestic,2026-07-13,,sp500,sp500
 PG,,0000080424,general,,,domestic,2026-07-13,,sp500,sp500
 PGR,,0000080661,general,,,domestic,2026-07-13,,sp500,sp500
@@ -374,6 +384,7 @@ RAMP,Liveramp Holdings Inc,0000733269,general,,,domestic,2026-04-07,,cm,other
 RBLX,Roblox Corp,0001315098,general,,,domestic,2026-04-07,,cm,other
 RCL,,0000884887,general,,,domestic,2026-07-13,,sp500,sp500
 REG,,0000910606,general,,,domestic,2026-07-13,,sp500,sp500
+REGN,Regeneron Pharmaceuticals Inc,0000872589,general,Biotech,,domestic,2026-07-13,,cm,sp500
 RF,,0001281761,general,,,domestic,2026-07-13,,sp500,sp500
 RJF,,0000720005,general,,,domestic,2026-07-13,,sp500,sp500
 RL,,0001037038,general,,,domestic,2026-07-13,,sp500,sp500
@@ -462,8 +473,10 @@ VMC,,0001396009,general,,,domestic,2026-07-13,,sp500,sp500
 VRSK,,0001442145,general,,,domestic,2026-07-13,,sp500,sp500
 VRSN,,0001014473,general,,,domestic,2026-07-13,,sp500,sp500
 VRT,,0001674101,general,,,domestic,2026-07-13,,sp500,sp500
+VRTX,Vertex Pharmaceuticals Inc,0000875320,general,Biotech,,domestic,2026-07-13,,cm,sp500
 VST,,0001692819,general,,,domestic,2026-07-13,,sp500,sp500
 VTEX,VTEX,0001793663,general,,,foreign,2026-04-07,,cm,other
+VTRS,Viatris Inc,0001792044,general,Specialty & Generic Pharma,,domestic,2026-07-13,,cm,sp500
 VZ,,0000732712,general,,,domestic,2026-07-13,,sp500,sp500
 WAB,,0000943452,general,,,domestic,2026-07-13,,sp500,sp500
 WBD,,0001437107,general,,,domestic,2026-07-13,,sp500,sp500

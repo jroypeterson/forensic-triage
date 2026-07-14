@@ -51,6 +51,9 @@ SUBGROUP_MAP = {
     "Healthcare Services": "hc_services",
     "MedTech": "medtech",
     "Life Science Tools": "medtech",
+    # Large-cap biopharma (S&P 500 only — see LARGE_CAP_ONLY_SECTORS) uses the general
+    # rubric for now (no biopharma-specific rubric yet — a future addition).
+    "Biopharma": "general",
     # Everything else that survives the filter falls through to "general"
     "Tech": "general",
     "SaaS": "general",
@@ -58,7 +61,12 @@ SUBGROUP_MAP = {
     "Other": "general",
 }
 
-EXCLUDED_SECTORS = {"Biopharma"}
+EXCLUDED_SECTORS: set[str] = set()  # (was {"Biopharma"} — now conditional, see below)
+
+# Biopharma is screened ONLY when large-cap (proxied by S&P 500 membership): big pharma
+# (LLY/PFE/MRK…) has normal financials the rubric handles; small/pre-revenue biotech
+# accruals/revenue rules are noise, so non-S&P-500 biopharma stays excluded. (JP 2026-07-13.)
+LARGE_CAP_ONLY_SECTORS = {"Biopharma"}
 
 WATCHLIST_FIELDS = [
     "ticker",
@@ -116,7 +124,8 @@ def load_existing_watchlist() -> dict[str, dict]:
         return {row["ticker"]: row for row in reader if row.get("ticker")}
 
 
-def load_coverage(coverage_csv: Path) -> list[dict]:
+def load_coverage(coverage_csv: Path, large_cap: set[str] | None = None) -> list[dict]:
+    large_cap = large_cap or set()
     rows = []
     with coverage_csv.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -128,6 +137,11 @@ def load_coverage(coverage_csv: Path) -> list[dict]:
                 continue
             if sector not in SUBGROUP_MAP:
                 continue
+            # Biopharma only if large-cap (S&P 500) — see LARGE_CAP_ONLY_SECTORS.
+            if sector in LARGE_CAP_ONLY_SECTORS:
+                ticker = (row.get("Ticker", "") or "").strip().upper()
+                if ticker not in large_cap:
+                    continue
             rows.append(row)
     return rows
 
@@ -296,7 +310,12 @@ def main() -> int:
         return 1
 
     existing = load_existing_watchlist()
-    coverage_rows = load_coverage(coverage_csv)
+    try:
+        import coverage_cohorts as cc
+        large_cap = cc.load_sp500()  # S&P 500 = large-cap proxy for biopharma inclusion
+    except Exception:
+        large_cap = set()
+    coverage_rows = load_coverage(coverage_csv, large_cap)
     today = date.today().isoformat()
     new_rows, added, removed, subgroup_changes = build_new_watchlist(
         coverage_rows, existing, today

@@ -1,0 +1,16 @@
+[
+  {
+    "date": "2026-07-14",
+    "screened": 59,
+    "pending": 624,
+    "red": 6,
+    "yellow": 36,
+    "by_cohort": {
+      "portfolio": 10,
+      "researching": 1,
+      "core": 48,
+      "sp500": 0,
+      "other": 0
+    }
+  }
+]

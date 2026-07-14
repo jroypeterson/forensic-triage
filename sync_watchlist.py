@@ -85,6 +85,14 @@ WATCHLIST_FIELDS = [
 COHORT_TOTALS_JSON = ROOT / "data" / "cohort_totals.json"
 
 
+def ckey(t: str) -> str:
+    """Canonical ticker key for cross-source comparison. SEC / sigma-S&P / CM disagree
+    on class-share punctuation (`BRK.B` vs `BRK-B`, `BF.B` vs `BF-B`); fold `.`→`-` so
+    the same security matches across sources and isn't double-added. Distinct tickers
+    like GOOG vs GOOGL are unaffected (different letters, not punctuation)."""
+    return (t or "").strip().upper().replace(".", "-")
+
+
 def normalize_cik(raw: str) -> str:
     """Normalize a Coverage Manager CIK to a zero-padded 10-digit string.
 
@@ -258,19 +266,27 @@ def build_sp500_extras(
     # (Using just the sp500 roster avoids pulling in foreign CM-position tickers whose
     # export format differs from the CM master, which have no SEC CIK anyway.)
     core_set = rosters["core"]
+    # Compare on the canonical key so a class-ticker CM already carries (BRK-B) isn't
+    # re-added under sigma's spelling (BRK.B).
+    cm_canon = {ckey(t) for t in cm_master}
+    added_canon = {ckey(t) for t in already_added}
     extras = sorted(t for t in rosters["sp500"]
-                    if t not in cm_master and t not in already_added)
+                    if ckey(t) not in cm_canon and ckey(t) not in added_canon)
 
     sec_ciks = load_sec_ticker_ciks() if extras else {}
     rows: list[dict] = []
     added: list[str] = []
     unresolved: list[str] = []
     for ticker in extras:
-        cik = sec_ciks.get(ticker) or sec_ciks.get(ticker.replace(".", "-"))
+        prev = existing.get(ticker)
+        # Prefer a fresh SEC resolution, but fall back to the already-known CIK on an
+        # existing row so a transient SEC-map outage can't DROP established S&P rows
+        # (which would then be reported "removed" and written out of the watchlist).
+        cik = (sec_ciks.get(ticker) or sec_ciks.get(ticker.replace(".", "-"))
+               or (prev.get("cik") if prev and prev.get("cik") else ""))
         if not cik:
             unresolved.append(ticker)
             continue  # no CIK -> can't EDGAR-screen; skip loudly (reported below)
-        prev = existing.get(ticker)
         rows.append({
             "ticker": ticker,
             "company_name": prev.get("company_name", "") if prev else "",
@@ -340,23 +356,33 @@ def main() -> int:
 
     # Bake the cohort onto every row (+ disjoint roster totals) so CI — which has no
     # CM/sigma sibling repos — reads cohorts from the committed watchlist, not live.
+    # The rosters are REQUIRED for a correct local sync: if the sibling exports are
+    # missing/empty, cohort_for would stamp everything "other"/"sp500" and bake zeros
+    # into cohort_totals.json — poisoned columns CI then trusts. So abort the write
+    # rather than persist a mis-partitioned universe.
     cohort_totals: dict[str, int] = {}
     try:
         import coverage_cohorts as cc
         rosters = cc.load_rosters()
-        for r in new_rows:
-            r["cohort"] = cc.cohort_for(r["ticker"], rosters)
-        p, rr, co, sp = (rosters["portfolio"], rosters["researching"],
-                         rosters["core"], rosters["sp500"])
-        cohort_totals = {
-            "portfolio": len(p), "researching": len(rr - p),
-            "core": len(co - rr - p), "sp500": len(sp - co - rr - p),
-        }
     except Exception as e:
-        print(f"WARNING: cohort stamping failed ({e}); rows left without a cohort.",
-              file=sys.stderr)
-        for r in new_rows:
-            r.setdefault("cohort", "")
+        print(f"ERROR: coverage_cohorts unavailable ({e}); cannot bake cohorts — refusing "
+              f"to write a watchlist without them.", file=sys.stderr)
+        return 1
+    missing = [c for c in ("portfolio", "core", "sp500") if not rosters.get(c)]
+    if missing:
+        print(f"ERROR: coverage rosters empty/missing: {', '.join(missing)}. The CM exports "
+              f"(portfolio.json/universe_metadata.json) + sigma-alert/sources/sp500.txt are "
+              f"REQUIRED for a correct local sync. Refusing to bake poisoned cohorts into "
+              f"watchlist.csv — check the sibling repos.", file=sys.stderr)
+        return 1
+    for r in new_rows:
+        r["cohort"] = cc.cohort_for(r["ticker"], rosters)
+    p, rr, co, sp = (rosters["portfolio"], rosters["researching"],
+                     rosters["core"], rosters["sp500"])
+    cohort_totals = {
+        "portfolio": len(p), "researching": len(rr - p),
+        "core": len(co - rr - p), "sp500": len(sp - co - rr - p),
+    }
 
     by_subgroup: dict[str, int] = {}
     for r in new_rows:

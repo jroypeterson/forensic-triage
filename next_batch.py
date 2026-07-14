@@ -65,13 +65,15 @@ def screened_since(cycle_start: str) -> set[str]:
     return done
 
 
-def row_cohort(row: dict, rosters: dict[str, set[str]]) -> str:
-    """Baked `cohort` column (CI-safe) if present, else compute live from rosters."""
+def row_cohort(row: dict, rosters: dict[str, set[str]] | None = None) -> str:
+    """Baked `cohort` column (CI-safe) if present, else compute live from rosters.
+    `rosters=None` → `cohort_for` loads them live (defensive; avoids a hard dep on
+    the caller pre-loading rosters)."""
     c = (row.get("cohort") or "").strip()
     return c if c else cc.cohort_for(row.get("ticker", ""), rosters)
 
 
-def sort_key(row: dict, rosters: dict[str, set[str]]):
+def sort_key(row: dict, rosters: dict[str, set[str]] | None = None):
     cohort_rank = cc.COHORT_RANK.get(row_cohort(row, rosters), 99)
     sg_rank = SUBGROUP_ORDER.get(row.get("sector_subgroup", ""), 9)
     return (cohort_rank, sg_rank, row.get("ticker", ""))

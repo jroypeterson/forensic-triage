@@ -75,6 +75,15 @@ and `sync` also writes `data/cohort_totals.json` (disjoint roster sizes). Both a
 so CI — which has **no CM/sigma sibling repos** — reads cohorts from the watchlist, not live.
 `next_batch.py` and `dashboard.py` read the baked `cohort` with a live-roster fallback.
 
+**GOTCHA — `sync_watchlist.py` REQUIRES the sibling rosters (Codex-hardened 2026-07-13).** The
+sync aborts with `rc=1` (writing nothing) if `coverage_cohorts` can't import or any of the
+`portfolio`/`core`/`sp500` rosters are empty — otherwise it would bake mis-partitioned cohorts +
+zeroed `cohort_totals.json` that CI then trusts. So **only run `sync_watchlist.py` locally**, where
+`../Coverage Manager/exports/*.json` + `../sigma-alert/sources/sp500.txt` are present. CI never
+syncs — it screens off the committed watchlist. Also: a transient SEC-map outage no longer drops
+existing S&P rows (falls back to the row's known CIK), and class-ticker punctuation is folded
+(`ckey()`: `BRK.B`≡`BRK-B`) so a name isn't double-added across sources.
+
 ## Coverage Dashboard (`dashboard.py`)
 
 Forensic triage is a **standing process**, not a one-shot task — names are screened a few per

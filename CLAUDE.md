@@ -98,7 +98,11 @@ python dashboard.py --per-day 6 --cycle-start 2026-06-20
   ring — forensic skips biopharma at sync, so e.g. ~10 Portfolio names aren't screened and that
   gap is shown, never hidden.
 - **Day-over-day** delta persisted to `.health/dashboard_history.json` (saved on `--post`).
-- **ETA** projects the full-sweep finish at the batch rate.
+- **Per-ring ETA** — `DAYS` + `DONE BY` columns. Screening runs top-down by priority, so a ring's
+  completion is **cumulative**: it finishes only after everything above it plus its own pending
+  is screened (Portfolio in days; S&P 500 last). A ring with 0 pending shows `done`. The forensic
+  cadence is **a few names every day** — the dashboard tracks that steady progress; there is no
+  "run the whole universe at once" step.
 
 **Cadence:** the daily Path-A workflow (`forensic_triage.yml`, 18:30 UTC) runs
 `dashboard.py --post --html` after the screen step (`continue-on-error` — a digest failure can

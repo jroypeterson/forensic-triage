@@ -130,6 +130,39 @@ def test_diff_vs_prior(monkeypatch):
     assert data["diff"]["red"] == 1
 
 
+def test_eta_is_cumulative_by_priority(monkeypatch):
+    # 6 portfolio + 6 core pending at 6/day: portfolio finishes day 1, core day 2 (queued behind).
+    watchlist = ([_wl_row(f"P{i}", "portfolio") for i in range(6)] +
+                 [_wl_row(f"C{i}", "core") for i in range(6)])
+    monkeypatch.setattr(dashboard, "load_watchlist", lambda: watchlist)
+    monkeypatch.setattr(dashboard, "latest_screens", lambda cs: {})
+    monkeypatch.setattr(dashboard, "_load_cohort_totals", lambda: {"portfolio": 6, "core": 6})
+    monkeypatch.setattr(dashboard, "_load_history", lambda: [])
+    monkeypatch.setattr(cc, "load_rosters", lambda: {k: set() for k in
+                                                     ("portfolio", "researching", "core", "sp500")})
+    data = dashboard.gather(per_day=6, today="2026-07-13")
+    assert data["cohorts"]["portfolio"]["eta_days"] == 1
+    assert data["cohorts"]["portfolio"]["eta_date"] == "2026-07-14"
+    assert data["cohorts"]["core"]["eta_days"] == 2          # cumulative (6+6)/6
+    assert data["cohorts"]["core"]["eta_date"] == "2026-07-15"
+
+
+def test_eta_done_ring_has_no_date(monkeypatch):
+    # A ring with 0 pending is complete now even if a lower ring still has pending.
+    watchlist = [_wl_row("AAA", "portfolio"), _wl_row("BBB", "core")]
+    monkeypatch.setattr(dashboard, "load_watchlist", lambda: watchlist)
+    monkeypatch.setattr(dashboard, "latest_screens", lambda cs:
+                        {"AAA": {"tier": "Green", "flag_details": "", "run_date": "2026-07-01"}})
+    monkeypatch.setattr(dashboard, "_load_cohort_totals", lambda: {"portfolio": 1, "core": 1})
+    monkeypatch.setattr(dashboard, "_load_history", lambda: [])
+    monkeypatch.setattr(cc, "load_rosters", lambda: {k: set() for k in
+                                                     ("portfolio", "researching", "core", "sp500")})
+    data = dashboard.gather(per_day=6, today="2026-07-13")
+    assert data["cohorts"]["portfolio"]["pending"] == 0
+    assert data["cohorts"]["portfolio"]["eta_date"] is None    # already done
+    assert data["cohorts"]["core"]["eta_date"] is not None     # still pending
+
+
 def test_plaintext_renders(monkeypatch):
     monkeypatch.setattr(dashboard, "load_watchlist", lambda: [_wl_row("AAA", "core")])
     monkeypatch.setattr(dashboard, "latest_screens", lambda cs: {})

@@ -160,6 +160,24 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
         in_wl = coh[c]["domestic"] + coh[c]["foreign"]
         coh[c]["excluded"] = max(0, rsize - in_wl)
 
+    # Per-ring ETA. Screening runs top-down by priority, so a ring is only complete
+    # once everything ABOVE it plus its own pending is screened -> cumulative days.
+    # A ring with 0 pending is already complete now (regardless of rings above it).
+    cum_pending = 0
+    for c in COHORTS:
+        b = coh[c]
+        cum_pending += b["pending"]
+        if b["pending"] == 0:
+            b["eta_days"] = 0
+            b["eta_date"] = None  # already complete
+        elif per_day > 0:
+            days = -(-cum_pending // per_day)  # ceil of cumulative pending
+            b["eta_days"] = days
+            b["eta_date"] = (date.fromisoformat(today) + timedelta(days=days)).isoformat()
+        else:
+            b["eta_days"] = None
+            b["eta_date"] = None
+
     # Overall roll-up (domestic denominators — foreign are Data-Gap, not screenable).
     dom_total = sum(b["domestic"] for b in coh.values())
     dom_screened = sum(b["screened"] for b in coh.values())
@@ -169,9 +187,10 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
     foreign_total = sum(b["foreign"] for b in coh.values())
 
     eta_date = None
+    eta_days = None
     if dom_pending > 0 and per_day > 0:
-        days = -(-dom_pending // per_day)  # ceil
-        eta_date = (date.fromisoformat(today) + timedelta(days=days)).isoformat()
+        eta_days = -(-dom_pending // per_day)  # ceil
+        eta_date = (date.fromisoformat(today) + timedelta(days=eta_days)).isoformat()
 
     # Flagged names across cohorts, priority order then Red-before-Yellow.
     flagged = []
@@ -194,6 +213,7 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
             "pct": (100.0 * dom_screened / dom_total) if dom_total else 0.0,
         },
         "eta_date": eta_date,
+        "eta_days": eta_days,
         "flagged": flagged,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
@@ -265,25 +285,49 @@ def save_snapshot(data: dict) -> None:
 
 # ---------------------------------------------------------------- rendering
 
+def _fmt_done_by(iso: str | None, pending: int) -> str:
+    if pending == 0:
+        return "done"
+    if not iso:
+        return "-"
+    try:
+        return date.fromisoformat(iso).strftime("%b %d")  # e.g. "Oct 26"
+    except Exception:
+        return iso
+
+
+def _fmt_days(days: int | None, pending: int) -> str:
+    if pending == 0:
+        return "-"
+    return "?" if days is None else str(days)
+
+
 def _cov_table(data: dict) -> list[str]:
     coh = data["cohorts"]
-    lines = [f"{'RING':<14}{'SCREENED':>11}  {'R / Y':>7}  {'PENDING':>8}  {'DATA-GAP':>8}"]
-    lines.append("-" * 54)
-    def _row(label, screened, domestic, red, yellow, pending, foreign):
+    head = (f"{'RING':<14}{'SCREENED':>10}  {'R / Y':>6}  {'PEND':>5}  "
+            f"{'DAYS':>5}  {'DONE BY':>8}  {'GAP':>4}")
+    lines = [head, "-" * len(head)]
+
+    def _row(label, screened, domestic, red, yellow, pending, days, done_by, foreign):
         sc = f"{screened}/{domestic}"
         ry = f"{red} / {yellow}"
-        return f"{label:<14}{sc:>11}  {ry:>7}  {pending:>8}  {foreign:>8}"
+        return (f"{label:<14}{sc:>10}  {ry:>6}  {pending:>5}  "
+                f"{days:>5}  {done_by:>8}  {foreign:>4}")
 
     for c in COHORTS:
         b = coh[c]
         if b["total"] == 0:
             continue
         lines.append(_row(cc.COHORT_LABEL[c], b["screened"], b["domestic"],
-                          b["tiers"]["Red"], b["tiers"]["Yellow"], b["pending"], b["foreign"]))
+                          b["tiers"]["Red"], b["tiers"]["Yellow"], b["pending"],
+                          _fmt_days(b.get("eta_days"), b["pending"]),
+                          _fmt_done_by(b.get("eta_date"), b["pending"]), b["foreign"]))
     t = data["totals"]
-    lines.append("-" * 54)
-    lines.append(_row("TOTAL", t["screened"], t["domestic"],
-                      t["red"], t["yellow"], t["pending"], t["foreign"]))
+    lines.append("-" * len(head))
+    total_days = _fmt_days(data.get("eta_days"), t["pending"])
+    total_done = _fmt_done_by(data.get("eta_date"), t["pending"])
+    lines.append(_row("TOTAL", t["screened"], t["domestic"], t["red"], t["yellow"],
+                      t["pending"], total_days, total_done, t["foreign"]))
     return lines
 
 
@@ -381,6 +425,9 @@ def render_html(data: dict) -> str:
         if b["total"] == 0:
             continue
         pct = (100.0 * b["screened"] / b["domestic"]) if b["domestic"] else 0.0
+        days = _fmt_days(b.get("eta_days"), b["pending"])
+        done_by = _fmt_done_by(b.get("eta_date"), b["pending"])
+        done_cls = "dim" if b["pending"] == 0 else ""
         rows.append(
             f"<tr><td class='ring'>{_html.escape(cc.COHORT_LABEL[c])}</td>"
             f"<td class='num'>{b['screened']}/{b['domestic']}</td>"
@@ -389,6 +436,8 @@ def render_html(data: dict) -> str:
             f"<td class='num red'>{b['tiers']['Red']}</td>"
             f"<td class='num yel'>{b['tiers']['Yellow']}</td>"
             f"<td class='num'>{b['pending']}</td>"
+            f"<td class='num {done_cls}'>{days}</td>"
+            f"<td class='num {done_cls}'>{done_by}</td>"
             f"<td class='num dim'>{b['foreign']}</td></tr>"
         )
     flagged_rows = []
@@ -435,8 +484,10 @@ font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:2
 h1{{font-size:20px;margin:0 0 4px}}
 .sub{{color:var(--dim);margin:0 0 2px}}
 .diff{{color:var(--accent);margin:6px 0 0;font-size:14px}}
+.tscroll{{overflow-x:auto;margin:20px 0}}
 table{{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;
 overflow:hidden;margin:20px 0}}
+.tscroll table{{margin:0;min-width:640px}}
 th,td{{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}}
 th{{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}}
 tr:last-child td{{border-bottom:none}}
@@ -458,9 +509,10 @@ footer{{color:var(--dim);font-size:12px;margin-top:24px}}
 <h1>forensic_triage — coverage dashboard</h1>
 <p class="sub">{today} · cycle since {cycle_start} · {screened}/{domestic} screened ({pct}%) · {red} red / {yellow} yellow{eta_line}</p>
 {diff_line}
-<table><tr><th>Ring</th><th class="num">Screened</th><th>Progress</th>
-<th class="num">🔴</th><th class="num">🟡</th><th class="num">Pending</th><th class="num">Data-gap</th></tr>
-{rows}</table>
+<div class="tscroll"><table><tr><th>Ring</th><th class="num">Screened</th><th>Progress</th>
+<th class="num">🔴</th><th class="num">🟡</th><th class="num">Pending</th>
+<th class="num">Days</th><th class="num">Complete by</th><th class="num">Data-gap</th></tr>
+{rows}</table></div>
 {flagged_section}
 <footer>Rings are disjoint, priority order: Portfolio → Researching → Core → S&amp;P 500. “Screened” = a completed forensic run since the cycle start. Data-gap = foreign filers (20-F/IFRS) the 10-K rubric can’t evaluate. Biopharma is screened only when large-cap (S&amp;P 500). Generated {generated_at}.</footer>
 </div></body></html>"""

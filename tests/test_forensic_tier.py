@@ -121,6 +121,43 @@ def test_new_name_auto_yellow():
     assert tier == "Yellow"
 
 
+# --- "new flag this run" diff rule (F5) ---
+
+def test_new_flag_since_clean_last_run_is_yellow():
+    # A single family fires now that was CLEAN in the last complete run -> Yellow, not Green
+    # (CLAUDE.md new-flag rule; would-be Green under the 0-1 rule without the diff).
+    prior = _flags()  # last run: nothing fired
+    tier, why = finalize_tier(flags=_flags("revenue"), coverage=_cov(), subgroup="hc_services",
+                              prior_flags=prior)
+    assert tier == "Yellow"
+    assert "new flag" in why.lower() and "revenue" in why
+
+
+def test_persisting_single_flag_stays_green():
+    # The SAME single benign family fired last run and this run -> still Green (Diff > level: a
+    # six-month-old flag is not news; only a NEW flag escalates).
+    prior = _flags("revenue")
+    tier, _ = finalize_tier(flags=_flags("revenue"), coverage=_cov(), subgroup="hc_services",
+                            prior_flags=prior)
+    assert tier == "Green"
+
+
+def test_no_prior_baseline_single_flag_is_green():
+    # No prior_flags baseline (None) must NOT spuriously escalate every flag — a genuinely
+    # first-seen name is handled by is_new instead. One benign family, no baseline -> Green.
+    tier, _ = finalize_tier(flags=_flags("revenue"), coverage=_cov(), subgroup="hc_services",
+                            prior_flags=None)
+    assert tier == "Green"
+
+
+def test_new_flag_with_two_families_still_yellow_reason_prefers_count():
+    # Two families already Yellow by count; prior baseline present shouldn't break that path.
+    prior = _flags()
+    tier, _ = finalize_tier(flags=_flags("revenue", "leverage"), coverage=_cov(),
+                            subgroup="hc_services", prior_flags=prior)
+    assert tier == "Yellow"
+
+
 def test_missing_coverage_key_defaults_unavailable_not_green():
     # Defensive: absent coverage info must not be read as clean.
     cov = {f: "complete" for f in FAMILIES}

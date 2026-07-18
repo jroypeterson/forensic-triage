@@ -74,6 +74,7 @@ def run_screen(*, batch_size: int, run_id: str, cycle_start: str) -> int:
 
     print(f"Run {run_id}: screening {len(tickers)} names: {', '.join(tickers)}")
     new_set = tier_batch._new_names()
+    prior_flags = tier_batch._prior_flags()  # last-complete-run vectors for the new-flag diff rule
 
     results = []
     for ticker in tickers:
@@ -89,7 +90,8 @@ def run_screen(*, batch_size: int, run_id: str, cycle_start: str) -> int:
         edgar_fetch.write_record(rec, edgar_fetch.DEFAULT_OUT_DIR)
 
         # 2. tier (Anthropic judge + deterministic guardrails)
-        res = tier_batch.tier_one(rec, subgroup=subgroup, is_new=(ticker in new_set))
+        res = tier_batch.tier_one(rec, subgroup=subgroup, is_new=(ticker in new_set),
+                                  prior_flags=prior_flags.get(ticker))
         results.append(res)
         print(f"  {ticker:<6} {res['tier']:<16} status={res['status']}  {res['reason']}")
 

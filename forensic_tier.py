@@ -13,7 +13,9 @@ Precedence (highest first):
   Red              — critical governance (4.02/restatement/auditor-resignation/NT), OR 3+ families
                      fired, OR a high-severity family corroborated by a second.
   Yellow           — 2 families, OR a single high-severity family, OR a new name (baseline), OR a
-                     signal present while required coverage is incomplete ("watch").
+                     family that fired THIS run but was clean in the name's last run (the
+                     "new flag" diff rule), OR a signal present while required coverage is
+                     incomplete ("watch").
   DataGap          — required coverage incomplete AND no positive signal (couldn't evaluate, nothing fired).
   Green            — required coverage complete AND 0-1 (benign) families AND no critical signal.
 
@@ -49,10 +51,21 @@ def finalize_tier(
     high_severity: bool = False,
     corporate_action: str | None = None,
     is_new: bool = False,
+    prior_flags: dict | None = None,
 ) -> tuple[str, str]:
-    """Return (tier, reason). `flags` = {family: 0/1} from Claude's judgment."""
+    """Return (tier, reason). `flags` = {family: 0/1} from Claude's judgment.
+
+    `prior_flags` = the family vector ({family: 0/1}) from the name's most recent COMPLETE run,
+    or None when there is no prior baseline (first appearance is covered by `is_new`). A family
+    that fires this run but did not fire in `prior_flags` is a NEW flag and escalates a would-be
+    Green to Yellow (CLAUDE.md Yellow rule + the "Diff > level" doctrine — a fresh signal must
+    not be buried in Green just because only one benign family fired)."""
     fired = [f for f in FAMILIES if flags.get(f)]
     n = len(fired)
+    # Families firing now that were clean in the last complete run (None baseline -> not "new";
+    # a genuinely-first-seen name is escalated via `is_new`, so absence of prior data never
+    # spuriously escalates every flag here).
+    newly_fired = [f for f in fired if prior_flags is not None and not prior_flags.get(f)]
     accounting_concern = bool(critical_governance or high_severity or n)
 
     # 1. Corporate action only when there is NO accounting concern (else the concern wins).
@@ -86,6 +99,9 @@ def finalize_tier(
         return "Yellow", f"single high-severity family ({', '.join(fired) or '?'})"
     if is_new:
         return "Yellow", "new name (first appearance) -> baseline read"
-    # 0 or 1 benign family, fully evaluated.
+    # A family fired this run that was clean last run -> at least Yellow (diff rule).
+    if newly_fired:
+        return "Yellow", f"new flag this run, clean last run ({', '.join(newly_fired)}) -> watch"
+    # 0 or 1 benign (persisting) family, fully evaluated.
     return "Green", ("0 families, fully evaluated" if n == 0
-                     else f"1 family fired ({fired[0]}), no critical signal -> Green per 0-1 rule")
+                     else f"1 family fired ({fired[0]}), unchanged since last run, no critical signal -> Green per 0-1 rule")

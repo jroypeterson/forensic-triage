@@ -222,6 +222,69 @@ def test_fetch_failure_with_critical_signal_is_complete():
     assert res["status"] == "complete"  # a known signal means we DID evaluate it
 
 
+# --- F6: a transient fetch failure + a SOFT one-family flag must NOT close the screen ---
+def test_fetch_failure_with_soft_flag_only_stays_fetch_failed():
+    # domestic, fresh, required accounting families unavailable + source_errors, but the judge
+    # fired only a SOFT one-family flag (routine 5.02 churn) — no critical_gov, no high_severity.
+    # Pre-fix `any(flags)` marked this `complete`, dropping the name from the cycle before its
+    # accounting families ever loaded. It must retry next run (codex F6).
+    rec = _record(coverage={"accruals": "unavailable", "revenue": "unavailable",
+                            "capex": "unavailable", "balance_sheet": "unavailable",
+                            "leverage": "unavailable"},
+                  source_errors=[{"source": "rest:income-statement", "error": "down"}])
+    res = tier_batch.tier_one(rec, subgroup="hc_services", judge=_verdict("governance"))
+    assert res["tier"] == "Yellow"          # a present soft signal + incomplete coverage -> watch
+    assert res["status"] == "fetch_failed"  # but NOT complete: accounting families never loaded
+
+
+def test_fetch_failure_with_high_severity_flag_is_complete():
+    # A HIGH-SEVERITY signal is actionable on its own -> it DOES close the evaluation.
+    rec = _record(coverage={"accruals": "unavailable", "revenue": "unavailable",
+                            "capex": "unavailable", "balance_sheet": "unavailable",
+                            "leverage": "unavailable"},
+                  source_errors=[{"source": "rest:income-statement", "error": "down"}])
+    res = tier_batch.tier_one(rec, subgroup="hc_services", judge=_verdict("revenue", high=True))
+    assert res["status"] == "complete"
+
+
+# --- F5: the new-flag diff rule flows through tier_one via prior_flags ---
+def test_tier_one_new_flag_since_clean_last_run_is_yellow():
+    rec = _record()  # full coverage, fresh, domestic
+    prior = _flags()  # clean last run
+    res = tier_batch.tier_one(rec, subgroup="hc_services",
+                              judge=_verdict("revenue"), prior_flags=prior)
+    assert res["tier"] == "Yellow"  # new flag -> watch (would be Green under the bare 0-1 rule)
+
+
+def test_tier_one_persisting_flag_stays_green():
+    rec = _record()
+    prior = _flags("revenue")
+    res = tier_batch.tier_one(rec, subgroup="hc_services",
+                              judge=_verdict("revenue"), prior_flags=prior)
+    assert res["tier"] == "Green"
+
+
+def test_prior_flags_reads_latest_complete_row(tmp_path):
+    # _prior_flags picks a ticker's most recent COMPLETE row; a later fetch_failed row is ignored.
+    hist = tmp_path / "flags_history.csv"
+    with hist.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=HISTORY_COLUMNS)
+        w.writeheader()
+        base = {c: "" for c in HISTORY_COLUMNS}
+        # older complete row: revenue fired
+        w.writerow(base | {"run_date": "2026-07-01", "ticker": "ACME", "tier": "Green",
+                           "revenue_flag": 1, "status": "complete"})
+        # newer complete row: clean (this is the baseline that should win)
+        w.writerow(base | {"run_date": "2026-07-10", "ticker": "ACME", "tier": "Green",
+                           "status": "complete"})
+        # newest row is fetch_failed -> must be ignored as a baseline
+        w.writerow(base | {"run_date": "2026-07-12", "ticker": "ACME", "tier": "Yellow",
+                           "governance_flag": 1, "status": "fetch_failed"})
+    prior = tier_batch._prior_flags(path=hist)
+    assert prior["ACME"]["revenue"] == 0  # newest COMPLETE (clean) wins, not the failed row
+    assert prior["ACME"]["governance"] == 0
+
+
 # --- run-level circuit breaker ---------------------------------------------------------
 def test_circuit_breaker_trips_on_majority_fetch_failed():
     results = [{"status": "fetch_failed"} for _ in range(3)] + [{"status": "complete"}]

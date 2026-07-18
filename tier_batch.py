@@ -292,6 +292,7 @@ def tier_one(
     *,
     subgroup: str | None = None,
     is_new: bool = False,
+    prior_flags: dict | None = None,
     client=None,
     judge=None,
     model: str = MODEL_ID,
@@ -300,6 +301,10 @@ def tier_one(
 
     `judge` lets tests inject the per-family verdict directly (skipping the API). In production
     `judge` is None and we call the Anthropic API via call_judge.
+
+    `prior_flags` = the family vector from this ticker's last COMPLETE run (or None); a family
+    firing now that was clean then escalates a would-be Green to Yellow (the CLAUDE.md new-flag
+    diff rule). The batch drivers load it via `_prior_flags()`.
     """
     subgroup = subgroup or record.get("_subgroup") or _guess_subgroup(record)
     ticker = record.get("ticker", "?")
@@ -323,11 +328,18 @@ def tier_one(
         high_severity=verdict["high_severity"],
         corporate_action=verdict["corporate_action"],
         is_new=is_new,
+        prior_flags=prior_flags,
     )
 
-    # Idempotency status (codex R2): a structural Data Gap (foreign/stale/not-disclosed) IS
-    # complete; a transient fetch failure with no overriding signal is NOT (retry next run).
-    has_signal = verdict["critical_governance"] or verdict["high_severity"] or any(verdict["flags"].values())
+    # Idempotency status (codex R2 + 2026-07-17): a structural Data Gap (foreign/stale/
+    # not-disclosed) IS complete; a transient fetch failure is NOT (retry next run) UNLESS a
+    # signal strong enough to close the evaluation fired. Only a CRITICAL-governance or
+    # HIGH-SEVERITY signal closes it — those are actionable on their own (auto-Red / Yellow
+    # watch) and worth committing even with statements missing. A mere SOFT one-family flag
+    # (e.g. routine 5.02 churn) must NOT mark the name `complete` while its required accounting
+    # families never loaded, or `next_batch` would drop it from the cycle and it's never
+    # re-screened (codex F6: `any(flags)` was silently closing partially-fetched names).
+    has_signal = verdict["critical_governance"] or verdict["high_severity"]
     if fetch_failed and not has_signal:
         status = "fetch_failed"
     else:
@@ -461,6 +473,7 @@ def main(argv=None) -> int:
 
     subgroups = _load_subgroups()
     new_set = _new_names()
+    prior = _prior_flags()
     results = []
     for t in tickers:
         t = t.upper()
@@ -470,7 +483,7 @@ def main(argv=None) -> int:
             print(f"  {t}: no fetched record (skipped)")
             continue
         sg = subgroups.get(t, "general")
-        res = tier_one(rec, subgroup=sg, is_new=(t in new_set))
+        res = tier_one(rec, subgroup=sg, is_new=(t in new_set), prior_flags=prior.get(t))
         results.append(res)
         print(f"  {t:<6} {res['tier']:<16} status={res['status']}  {res['reason']}")
 
@@ -513,6 +526,38 @@ def _new_names() -> set:
                 if t and t not in seen_hist:
                     new.add(t)
     return new
+
+
+def _prior_flags(path: Path = FLAGS_HISTORY_CSV) -> dict:
+    """Latest COMPLETE prior-run family-flag vector per ticker, for the "new flag -> Yellow" rule.
+
+    Returns {TICKER: {family: 0/1}} taken from each ticker's most recent `status=complete` row
+    (a `fetch_failed` row is a partial screen, not a reliable baseline; legacy rows without a
+    `status` column count as complete). A family firing this run that was clean in this baseline
+    escalates a would-be Green to Yellow (see finalize_tier). Rows are read in file order; the
+    latest run_date wins (ties -> later row in the file)."""
+    out: dict[str, dict] = {}
+    latest_date: dict[str, str] = {}
+    if not path.exists():
+        return out
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        has_status = "status" in (reader.fieldnames or [])
+        for row in reader:
+            t = (row.get("ticker") or "").strip().upper()
+            if not t:
+                continue
+            status = (row.get("status") or "").strip() if has_status else "complete"
+            if status not in ("", "complete"):
+                continue
+            rd = (row.get("run_date") or "").strip()
+            if t in latest_date and rd < latest_date[t]:
+                continue
+            latest_date[t] = rd
+            out[t] = {fam: (1 if str(row.get(f"{fam}_flag") or "0").strip() in ("1", "1.0")
+                            else 0)
+                      for fam in FAMILIES}
+    return out
 
 
 if __name__ == "__main__":

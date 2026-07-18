@@ -413,3 +413,135 @@ def test_stmt_ok_requires_mapped_line_items_not_just_http_200():
     # endpoint failed outright -> False regardless of keys
     ok2 = edgar_fetch._stmt_ok_from(annual, income=None, balance={}, cashflow={})
     assert ok2["income"] is False
+
+
+# --- codex 2026-07-17 F1: NT 10-K/10-Q late filings must be fetched + surfaced --------
+class _NTFiling:
+    def __init__(self, filing_date="2026-06-01", period_end="2026-03-31",
+                 accession="0000000001-26-000009"):
+        self.filing_date = filing_date
+        self.period_of_report = period_end
+        self.accession_no = accession
+
+
+class _CompanyWithNT(_FakeCompany):
+    def get_filings(self, form=None):
+        if form == "10-K":
+            return _FakeFilings(_FakeFiling("Inventory. Goodwill. Debt covenants."))
+        if form == "NT 10-K":
+            return _FakeFilings(_NTFiling())
+        return _FakeFilings(None)
+
+
+def test_nt_late_filing_is_fetched_and_surfaced(monkeypatch):
+    # A recent NT 10-K is a CRITICAL-governance auto-Red (general.md §6a). NT forms are not
+    # 8-Ks, so they were never fetched (NT_FORMS was dead code) and late filers tiered Green.
+    # The fetch must now surface the NT so the per-family judge can fire critical_governance.
+    monkeypatch.setattr(edgar_fetch, "_edgar_company", lambda cik, identity: _CompanyWithNT())
+    rec = edgar_fetch.fetch_ticker("LATE", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_OkRest())
+    _schema_keys_present(rec)
+    assert isinstance(rec["late_filings"], list)
+    forms = [lf["form"] for lf in rec["late_filings"]]
+    assert "NT 10-K" in forms, "a recent NT 10-K must be surfaced (auto-Red signal)"
+    nt = next(lf for lf in rec["late_filings"] if lf["form"] == "NT 10-K")
+    assert nt["filing_date"] == "2026-06-01"
+    assert nt["accession"] == "0000000001-26-000009"
+
+
+def test_no_nt_filing_leaves_late_filings_empty(monkeypatch):
+    monkeypatch.setattr(edgar_fetch, "_edgar_company",
+                        lambda cik, identity: _FakeCompany(tenk_text="Inventory. Goodwill. Debt."))
+    rec = edgar_fetch.fetch_ticker("CLEAN", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_OkRest())
+    assert rec["late_filings"] == []  # no NT -> no false late-filing signal
+
+
+# --- codex 2026-07-17 F3: statements fallback must not mark complete off a placeholder --
+def test_stmt_ok_from_periods_derives_from_line_item_keys():
+    real = [{"period": "FY-0", "revenue": 100, "net_income": 10, "cfo": 5,
+             "capex": 3, "total_assets": 500}]
+    assert edgar_fetch._stmt_ok_from_periods(real) == {
+        "income": True, "balance": True, "cashflow": True}
+    placeholder = [{"period": "latest", "source": "edgartools_financials"}]
+    assert edgar_fetch._stmt_ok_from_periods(placeholder) == {
+        "income": False, "balance": False, "cashflow": False}
+
+
+def test_statements_fallback_placeholder_marks_partial_not_complete(monkeypatch):
+    # REST down; edgartools Financials object loads but exposes NO usable line items (the
+    # base _FakeCompany.financials is a bare object()). The fallback must mark the financial
+    # families `partial`, NEVER `complete` on a contentless placeholder (false-Green when REST
+    # is down; codex 2026-07-17 F3). Before the fix the caller hardcoded _stmt_ok all-True.
+    monkeypatch.setattr(edgar_fetch, "_edgar_company",
+                        lambda cik, identity: _FakeCompany(tenk_text="Inventory. Goodwill. Debt covenants."))
+    rec = edgar_fetch.fetch_ticker("ACME", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_BoomRest())
+    _schema_keys_present(rec)
+    assert rec["statements"]["annual"]  # a placeholder IS present...
+    for fam in ("accruals", "revenue", "capex", "balance_sheet", "leverage"):
+        assert rec["family_coverage"][fam] == "partial", f"{fam} must be partial, not complete"
+    assert rec["required_families_complete"] is False
+
+
+class _FakeFinancials:
+    """A minimal edgartools-Financials stand-in exposing the getter API we extract from."""
+    def get_revenue(self, offset=0): return [100, 90, 80][offset]
+    def get_net_income(self, offset=0): return [10, 9, 8][offset]
+    def get_operating_cash_flow(self, offset=0): return [12, 11, 10][offset]
+    def get_capital_expenditures(self, offset=0): return [4, 4, 3][offset]
+    def get_total_assets(self, offset=0): return [500, 480, 460][offset]
+
+
+class _CoWithFinancials(_FakeCompany):
+    def get_filings(self, form=None):
+        if form == "10-K":
+            return _FakeFilings(_FakeFiling("Inventory. Goodwill. Debt covenants."))
+        if form == "8-K":
+            f = _FakeFiling("routine", filing_date="2026-05-01")
+            f.items = ""  # no governance item
+            return _FakeFilings(f)
+        return _FakeFilings(None)
+
+    def get_financials(self):
+        return _FakeFinancials()
+
+
+def test_statements_fallback_extracts_real_line_items(monkeypatch):
+    # REST down but edgartools Financials yields REAL line items -> the financial families are
+    # evaluated on data (complete), proving the fallback extracts rather than placeholders.
+    monkeypatch.setattr(edgar_fetch, "_edgar_company", lambda cik, identity: _CoWithFinancials())
+    rec = edgar_fetch.fetch_ticker("REAL", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_BoomRest())
+    _schema_keys_present(rec)
+    assert rec["statements"]["annual"][0]["revenue"] == 100
+    assert rec["statements"]["annual"][0]["cfo"] == 12
+    for fam in ("accruals", "capex", "balance_sheet", "leverage"):
+        assert rec["family_coverage"][fam] == "complete", f"{fam} should be complete on real line items"
+
+
+# --- codex 2026-07-17 F4: 8-K fallback must read the body for governance items ---------
+def test_8k_fallback_reads_body_for_governance_item(monkeypatch):
+    # REST down; an 8-K Item 4.01 whose body discloses a DISAGREEMENT is an auto-Red, while a
+    # routine re-tender is soft. The fallback dropped the body_excerpt, collapsing both to the
+    # same Green. It must now read the body so the judge can tell them apart (codex 2026-07-17 F4).
+    class _Co401(_FakeCompany):
+        def get_filings(self, form=None):
+            if form == "10-K":
+                return _FakeFilings(_FakeFiling("Inventory. Goodwill. Debt."))
+            if form == "8-K":
+                f = _FakeFiling(
+                    "Item 4.01 Changes in Registrant's Certifying Accountant. The dismissal "
+                    "involved a disagreement regarding revenue recognition.",
+                    filing_date="2026-05-01")
+                f.items = "4.01"
+                return _FakeFilings(f)
+            return _FakeFilings(None)
+
+    monkeypatch.setattr(edgar_fetch, "_edgar_company", lambda cik, identity: _Co401())
+    rec = edgar_fetch.fetch_ticker("ACME", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_BoomRest())
+    _schema_keys_present(rec)
+    ev = next(e for e in rec["events_8k"] if "4.01" in e.get("items", []))
+    assert "disagreement" in ev["body_excerpt"].lower(), \
+        "the 4.01 body must be read so a disagreement (auto-Red) isn't hidden as a routine re-tender"

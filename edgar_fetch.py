@@ -101,6 +101,7 @@ def _empty_record(ticker: str, cik: str, run_id: str) -> dict:
         "statements": {"annual": [], "quarters": []},
         "notes": {topic: {"status": "fetch_failed", "text": ""} for topic in NOTE_TOPICS},
         "events_8k": [],              # [{date, items, body_excerpt}]
+        "late_filings": [],           # [{form, filing_date, period_end, accession}] — NT 10-K/10-Q (auto-Red per general.md §6a)
         "corporate_action": None,     # {detected, kind}
         "insider": {"clusters": [], "status": "fetch_failed"},
         "family_coverage": {f: "unavailable" for f in FAMILIES},
@@ -363,6 +364,9 @@ def fetch_ticker(
     if company is not None:
         # latest 10-K / 10-Q + staleness (date-based)
         _safe(lambda: _populate_filings(rec, company), errors, "edgartools:filings")
+        # NT 10-K/10-Q late-filing notices (a recent one is an auto-Red per general.md §6a;
+        # NT forms are NOT 8-Ks, so the events feed never carried them — codex 2026-07-17 F1).
+        _safe(lambda: _populate_late_filings(rec, company), errors, "edgartools:late-filings")
         # note bodies (the thing only the free lib can do headlessly)
         _safe(lambda: _populate_notes(rec, company), errors, "edgartools:notes")
         # insider Form-4 (best-effort, OPTIONAL family)
@@ -373,9 +377,11 @@ def fetch_ticker(
                        "edgartools:statements-fallback", default=[])
             if fb:
                 rec["statements"]["annual"] = fb
-                # The financials object spans all three statements — coarse by
-                # design (preserves the fallback's original semantics).
-                rec["_stmt_ok"] = {"income": True, "balance": True, "cashflow": True}
+                # Per-statement coverage is derived from the line items ACTUALLY extracted,
+                # NOT hardcoded True: a contentless placeholder (financials object present but
+                # nothing mappable) leaves all three False -> the families fall to `partial`,
+                # never `complete` on nothing (false-Green when REST is down; codex 2026-07-17 F3).
+                rec["_stmt_ok"] = _stmt_ok_from_periods(fb)
         # fallback 8-K feed if REST events were unavailable (so an outage can't hide a 4.02)
         if not events_fetched:
             fb_events = _safe(lambda: _edgartools_events(company), errors,
@@ -453,6 +459,22 @@ def _events_payload_ok(payload) -> bool:
     if isinstance(payload, dict):
         return any(k in payload for k in ("data", "events"))
     return False
+
+
+def _stmt_ok_from_periods(annual: list) -> dict:
+    """Per-statement usable-coverage flags derived PURELY from which line-item keys the
+    normalized periods carry (for the edgartools fallback, where we don't have the three
+    separate REST payloads to gate on). A placeholder period with no line-item keys yields
+    all-False -> the caller marks the financial families `partial`, never `complete` (F3)."""
+    present: set[str] = set()
+    for p in annual or []:
+        if isinstance(p, dict):
+            present.update(p.keys())
+    return {
+        "income": bool(present & _INCOME_KEYS),
+        "balance": bool(present & _BALANCE_KEYS),
+        "cashflow": bool(present & _CASHFLOW_KEYS),
+    }
 
 
 def _stmt_ok_from(annual: list, income, balance, cashflow) -> dict:
@@ -595,6 +617,46 @@ def _populate_filings(rec: dict, company) -> None:
         rec["staleness"] = {"is_stale": False, "reason": f"latest 10-K period_end {ref} ({age}d old)"}
 
 
+def _populate_late_filings(rec: dict, company) -> None:
+    """Surface recent NT 10-K / NT 10-Q late-filing notices.
+
+    A late filing (NT 10-K/NT 10-Q in the last 12 months) is CRITICAL governance — an
+    automatic Red per general.md §6a. NT forms are NOT 8-Ks, so the `events_8k` feed never
+    carried them and the `NT_FORMS` constant was dead code: late filers silently tiered Green
+    (codex 2026-07-17 F1). We fetch them here and surface them on the record so the per-family
+    judge sees the signal and fires `critical_governance`. Best-effort + never-raise (wrapped by
+    _safe upstream); an NT is a distinct, additive signal, so a miss does not block Green on its
+    own (that path is governed by the 8-K coverage gate).
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for form in sorted(NT_FORMS):
+        try:
+            filings = company.get_filings(form=form)
+        except Exception:  # noqa: BLE001
+            filings = None
+        if not filings:
+            continue
+        try:
+            recent = filings.head(5) if hasattr(filings, "head") else filings[:5]
+        except Exception:  # noqa: BLE001
+            recent = filings
+        for f in recent:
+            accession = str(getattr(f, "accession_no", getattr(f, "accession_number", "")) or "")
+            filing_date = str(getattr(f, "filing_date", "") or "")
+            dedup_key = accession or f"{form}:{filing_date}"
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            out.append({
+                "form": form,
+                "filing_date": filing_date,
+                "period_end": str(getattr(f, "period_of_report", getattr(f, "report_date", "")) or ""),
+                "accession": accession,
+            })
+    rec["late_filings"] = out
+
+
 def _populate_notes(rec: dict, company) -> None:
     """Read 10-K note bodies. Distinguish present / not_disclosed / fetch_failed PER NOTE.
 
@@ -667,17 +729,84 @@ def _populate_insider(rec: dict, company) -> None:
     rec["insider"] = {"clusters": [], "recent_form4_dates": dates, "status": "present"}
 
 
+# edgartools Financials getters -> our compact line-item keys. These pull REAL values so the
+# financial families can be evaluated on data, not a placeholder (codex 2026-07-17 F3).
+_FIN_GETTERS = {
+    "revenue": "get_revenue",
+    "net_income": "get_net_income",
+    "cfo": "get_operating_cash_flow",
+    "capex": "get_capital_expenditures",
+    "total_assets": "get_total_assets",
+}
+
+
 def _edgartools_statements(company) -> list:
-    """Fallback statements via companyfacts/financials when REST is down."""
+    """Fallback statements via edgartools Financials when the paid REST is down.
+
+    Extract REAL line items (revenue / net income / CFO / capex / total assets) across the
+    available periods so the financial families are evaluated on actual data. The OLD version
+    returned a contentless placeholder and the caller then marked all five financial families
+    `complete` off it — a genuine false-Green whenever REST was down (codex 2026-07-17 F3). It
+    also read the wrong accessor (`company.financials`, which doesn't exist on edgartools'
+    Company — the correct one is `get_financials()`), so in production the fallback never fired.
+
+    If the Financials object loads but NO line item can be read, we return a single placeholder
+    period (no line-item keys) so `_stmt_ok_from_periods` leaves every statement False and the
+    caller marks the families `partial` (present-but-incomplete), never `complete` on nothing.
+    """
+    fin = None
     try:
-        fin = company.financials if hasattr(company, "financials") else None
+        if hasattr(company, "get_financials"):
+            fin = company.get_financials()
+        elif hasattr(company, "financials"):
+            fin = company.financials
     except Exception:  # noqa: BLE001
         fin = None
     if fin is None:
         return []
-    # We keep this minimal: presence of a financials object is enough for coverage to be
-    # non-unavailable; the detailed line-item extraction is best-effort and tolerant.
+
+    out: list[dict] = []
+    for offset in range(3):  # latest + two prior periods, best-effort
+        period: dict = {"period": f"FY-{offset}"}
+        got = False
+        for key, meth in _FIN_GETTERS.items():
+            fn = getattr(fin, meth, None)
+            if not callable(fn):
+                continue
+            val = None
+            try:
+                val = fn(offset)
+            except TypeError:
+                try:
+                    val = fn()
+                except Exception:  # noqa: BLE001
+                    val = None
+            except Exception:  # noqa: BLE001
+                val = None
+            if val is not None:
+                period[key] = val
+                got = True
+        if got:
+            out.append(period)
+        elif offset == 0:
+            break  # nothing readable at all -> fall through to the placeholder below
+    if out:
+        return out
+    # Financials object present but unmappable -> placeholder with NO line-item keys, so the
+    # caller marks the families `partial`, not `complete` (the F3 false-Green guard).
     return [{"period": "latest", "source": "edgartools_financials"}]
+
+
+def _filing_body_text(filing) -> str:
+    """Best-effort full-text of a filing (obj().text() then filing.text()); '' on any failure."""
+    try:
+        obj = filing.obj() if hasattr(filing, "obj") else None
+        txt = obj.text() if obj is not None and hasattr(obj, "text") else None
+        if txt is None:
+            txt = filing.text() if hasattr(filing, "text") else None
+        return txt or ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _edgartools_events(company) -> list:
@@ -698,10 +827,18 @@ def _edgartools_events(company) -> list:
         items = getattr(f, "items", None) or []
         if isinstance(items, str):
             items = [i.strip() for i in items.replace(";", ",").split(",") if i.strip()]
+        items = [str(i) for i in items]
+        # Read the BODY for the governance / corporate-action item codes so the judge can tell a
+        # 4.01-with-disagreement (auto-Red) from a routine auditor re-tender (soft) — the REST feed
+        # carries `body`, but this fallback dropped it, collapsing both to the same Green (F4).
+        item_set = set(items)
+        body = ""
+        if item_set & (GOV_8K_ITEMS | CORP_ACTION_8K_ITEMS):
+            body = _filing_body_text(f)
         out.append({
             "date": str(getattr(f, "filing_date", "") or ""),
-            "items": [str(i) for i in items],
-            "body_excerpt": "",
+            "items": items,
+            "body_excerpt": body[:500],
         })
     return out
 

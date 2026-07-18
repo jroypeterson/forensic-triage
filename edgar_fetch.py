@@ -350,7 +350,10 @@ def fetch_ticker(
 
     rest_events = _safe(lambda: rest.material_events(cik), errors, "rest:material-events")
     events_fetched = False
-    if rest_events is not None:
+    # Only trust the REST feed when it is genuinely events-shaped — an HTTP 200 `{}` must
+    # fall through to the edgartools fallback, never mark governance complete on zero events
+    # (codex 2026-07-17; see _events_payload_ok).
+    if rest_events is not None and _events_payload_ok(rest_events):
         rec["events_8k"] = _safe(lambda: _normalize_events(rest_events), errors,
                                  "normalize:events", default=[]) or []
         events_fetched = True
@@ -433,6 +436,23 @@ _INCOME_KEYS = {"revenue", "net_income", "gross_profit", "cogs"}
 _BALANCE_KEYS = {"total_assets", "inventory", "accounts_receivable", "goodwill",
                  "total_debt", "short_term_debt", "long_term_debt", "deferred_revenue"}
 _CASHFLOW_KEYS = {"cfo", "capex"}
+
+
+def _events_payload_ok(payload) -> bool:
+    """True only when a REST material-events payload is genuinely events-shaped.
+
+    An HTTP 200 with an empty/unmappable body (e.g. `{}`) must NOT count as a fetched 8-K
+    feed: it would mark governance `complete` on zero events AND skip the edgartools fallback
+    that actually reads the 8-Ks, hiding a 4.02 / NT / auditor-resignation (codex 2026-07-17).
+    This parallels `_stmt_ok_from` for statements — a `{}` classifies like a failure, not
+    coverage. A well-formed 'genuinely no 8-Ks' response still carries its container key
+    (e.g. `{"data": []}` / `{"events": []}`) and IS accepted; a bare list is accepted too.
+    """
+    if isinstance(payload, list):
+        return True
+    if isinstance(payload, dict):
+        return any(k in payload for k in ("data", "events"))
+    return False
 
 
 def _stmt_ok_from(annual: list, income, balance, cashflow) -> dict:

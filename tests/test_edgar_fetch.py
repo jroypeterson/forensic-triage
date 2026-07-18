@@ -343,6 +343,65 @@ def test_all_statements_ok_still_completes_families():
     assert cov["leverage"] == "complete"
 
 
+class _EmptyEventsRest:
+    """REST where statements work but material-events returns a junk {} (HTTP 200, no container)."""
+    def __init__(self):
+        self.api_key = "x"
+        self.identity = "id"
+
+    def ratios(self, cik): return {"net_debt_ebitda": 2.0}
+    def income_statement(self, cik):
+        return {"data": [{"period": "2025", "revenue": 100, "net_income": 10}]}
+    def balance_sheet(self, cik):
+        return {"data": [{"period": "2025", "total_assets": 500, "inventory": 50, "goodwill": 80}]}
+    def cash_flow(self, cik):
+        return {"data": [{"period": "2025", "cfo": 12, "capex": 8}]}
+    def metrics(self, cik): return {"data": []}
+    def material_events(self, cik): return {}   # junk empty payload (no data/events container)
+
+
+def test_empty_rest_events_falls_back_to_edgartools(monkeypatch):
+    # REST material-events returns {} (no container) -> must NOT mark governance complete on
+    # zero events; the edgartools fallback supplies the real 8-K (a 4.02) so it isn't hidden
+    # (codex 2026-07-17: parallels the _stmt_ok_from {} guard for statements).
+    class _Co8K(_FakeCompany):
+        def get_filings(self, form=None):
+            if form == "10-K":
+                return _FakeFilings(_FakeFiling("Inventory. Goodwill. Debt."))
+            if form == "8-K":
+                f = _FakeFiling("non-reliance", filing_date="2026-05-01")
+                f.items = "4.02"
+                return _FakeFilings(f)
+            return _FakeFilings(None)
+
+    monkeypatch.setattr(edgar_fetch, "_edgar_company", lambda cik, identity: _Co8K())
+    rec = edgar_fetch.fetch_ticker("ACME", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_EmptyEventsRest())
+    _schema_keys_present(rec)
+    items = [i for ev in rec["events_8k"] for i in ev.get("items", [])]
+    assert "4.02" in items, "empty {} REST events must fall back to edgartools, not hide the 4.02"
+    assert rec["family_coverage"]["governance"] == "complete"
+
+
+def test_empty_rest_events_without_fallback_blocks_governance(monkeypatch):
+    # REST events {} and NO edgartools 8-K available -> governance must be `unavailable`,
+    # not falsely `complete` on a junk empty payload.
+    monkeypatch.setattr(edgar_fetch, "_edgar_company", lambda cik, identity: None)
+    rec = edgar_fetch.fetch_ticker("ACME", "0000000001", subgroup="general",
+                                   filer_type="domestic", run_id="t", rest=_EmptyEventsRest())
+    assert rec["family_coverage"]["governance"] == "unavailable"
+
+
+def test_events_payload_ok_distinguishes_junk_from_empty():
+    # A well-formed 'genuinely no 8-Ks' response keeps its container key and IS accepted;
+    # a bare {} (no container) is rejected so it can't mark governance complete on nothing.
+    assert edgar_fetch._events_payload_ok({"data": []}) is True
+    assert edgar_fetch._events_payload_ok({"events": []}) is True
+    assert edgar_fetch._events_payload_ok([]) is True
+    assert edgar_fetch._events_payload_ok({}) is False
+    assert edgar_fetch._events_payload_ok(None) is False
+
+
 def test_stmt_ok_requires_mapped_line_items_not_just_http_200():
     """codex R2 2026-07-08: an empty {} response (HTTP 200, no rows) must not
     count as statement coverage."""

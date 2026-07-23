@@ -24,16 +24,16 @@ import os
 from datetime import date
 from pathlib import Path
 
-from forensic_schema import (
+from .forensic_schema import (
     COVERAGE,
     FAMILIES,
     HISTORY_COLUMNS,
     SCHEMA_VERSION,
     required_families,
 )
-from forensic_tier import finalize_tier
+from .forensic_tier import finalize_tier
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 RUBRICS_DIR = ROOT / "rubrics"
 FETCHED_DIR = ROOT / "data" / "fetched"
 FLAGS_HISTORY_CSV = ROOT / "data" / "flags_history.csv"

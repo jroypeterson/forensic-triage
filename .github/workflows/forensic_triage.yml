@@ -56,14 +56,14 @@ jobs:
         # Reads the committed watchlist (cohorts baked in) — no CM/sigma sibling repos
         # needed in CI. Posts to #forensic-flags if SLACK_WEBHOOK_FORENSIC is set (until
         # then the post raises and is swallowed here; the HTML is still written).
-        run: python dashboard.py --post --html
+        run: python -m forensic_triage.dashboard --post --html
 
       - name: Commit and push report + history
         if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/flags_history.csv reports/ data/ratios_latest.csv \
+          git add data/flags_history.csv "Forensic Reports/" data/ratios_latest.csv \
                   data/watchlist.csv data/cohort_totals.json .health/dashboard_history.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes to commit."

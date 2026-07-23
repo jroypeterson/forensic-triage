@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import edgar_fetch  # noqa: E402
-from forensic_schema import COVERAGE, FAMILIES  # noqa: E402
+from forensic_triage import edgar_fetch  # noqa: E402
+from forensic_triage.forensic_schema import COVERAGE, FAMILIES  # noqa: E402
 
 
 # --- fakes -----------------------------------------------------------------------------

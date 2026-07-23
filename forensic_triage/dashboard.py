@@ -15,11 +15,11 @@ that can't be EDGAR-screened. A day-over-day delta is persisted so the digest sh
 motion, and an ETA projects the full-sweep finish at the batch rate.
 
 Surfaces:
-  python dashboard.py                 # plaintext to stdout (dry-run; no post, no snapshot)
-  python dashboard.py --html          # also write reports/coverage_dashboard.html
-  python dashboard.py --post          # post Slack digest (#forensic-flags) + save snapshot
-  python dashboard.py --post --html   # both
-  python dashboard.py --per-day 6 --cycle-start 2026-06-20
+  python -m forensic_triage.dashboard                 # plaintext to stdout (dry-run; no post, no snapshot)
+  python -m forensic_triage.dashboard --html          # also write Forensic Reports/coverage_dashboard.html
+  python -m forensic_triage.dashboard --post          # post Slack digest (#forensic-flags) + save snapshot
+  python -m forensic_triage.dashboard --post --html   # both
+  python -m forensic_triage.dashboard --per-day 6 --cycle-start 2026-06-20
 """
 from __future__ import annotations
 
@@ -32,14 +32,14 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import coverage_cohorts as cc
+from . import coverage_cohorts as cc
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
 FLAGS_HISTORY_CSV = ROOT / "data" / "flags_history.csv"
 HEALTH_DIR = ROOT / ".health"
 HISTORY_PATH = HEALTH_DIR / "dashboard_history.json"
-HTML_OUT = ROOT / "reports" / "coverage_dashboard.html"
+HTML_OUT = ROOT / "Forensic Reports" / "coverage_dashboard.html"
 COHORT_TOTALS_JSON = ROOT / "data" / "cohort_totals.json"
 
 DEFAULT_CYCLE_START = "2026-06-20"
@@ -546,7 +546,7 @@ def main() -> int:
     p.add_argument("--per-day", type=int, default=DEFAULT_PER_DAY,
                    help="Batch rate for the full-sweep ETA")
     p.add_argument("--post", action="store_true", help="Post to Slack + save day-over-day snapshot")
-    p.add_argument("--html", action="store_true", help="Write reports/coverage_dashboard.html")
+    p.add_argument("--html", action="store_true", help="Write Forensic Reports/coverage_dashboard.html")
     args = p.parse_args()
 
     data = gather(cycle_start=args.cycle_start, per_day=args.per_day)

@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from forensic_schema import FAMILIES  # noqa: E402
-from forensic_tier import finalize_tier, green_eligible  # noqa: E402
+from forensic_triage.forensic_schema import FAMILIES  # noqa: E402
+from forensic_triage.forensic_tier import finalize_tier, green_eligible  # noqa: E402
 
 
 def _cov(subgroup="hc_services", **overrides):

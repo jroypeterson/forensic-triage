@@ -18,7 +18,7 @@ forensic_triage/
     cohort_totals.json            # Disjoint roster sizes (CI-safe; for the excluded count)
     flags_history.csv             # Per-company flag state per run (for diffs)
     ratios_latest.csv             # Latest computed ratios snapshot
-  reports/
+  Forensic Reports/
     coverage_dashboard.html       # Rendered coverage dashboard (HTML)
   .health/
     dashboard_history.json        # Day-over-day snapshots for the digest delta
@@ -26,7 +26,7 @@ forensic_triage/
     general.md                    # Universal forensic checks (any sector)
     healthcare_services.md        # Hospitals, providers, payers, PBMs, distributors
     medtech.md                    # Devices, diagnostics, capital equipment
-  reports/                        # Generated triage reports
+  Forensic Reports/               # Generated triage reports (human-facing, per OUTPUT_CONVENTIONS.md)
 ```
 
 ## Watchlist Source of Truth
@@ -52,9 +52,9 @@ The watchlist is **derived from** `../Coverage Manager/data/coverage_universe_ti
 
 ### Sync command
 ```
-python sync_watchlist.py            # write (CM universe + S&P 500 expansion ring)
-python sync_watchlist.py --dry-run  # report only
-python sync_watchlist.py --no-sp500 # CM universe only (skip the S&P 500 ring)
+python -m forensic_triage.sync_watchlist            # write (CM universe + S&P 500 expansion ring)
+python -m forensic_triage.sync_watchlist --dry-run  # report only
+python -m forensic_triage.sync_watchlist --no-sp500 # CM universe only (skip the S&P 500 ring)
 ```
 
 Run this **before** every triage. It is Step 0 of the weekly workflow below.
@@ -91,11 +91,11 @@ day and this dashboard shows coverage + freshness across the four rings so progr
 stay visible. Modeled on the transcripts daily digest.
 
 ```
-python dashboard.py                 # plaintext to stdout (dry-run; no post, no snapshot)
-python dashboard.py --html          # + write reports/coverage_dashboard.html
-python dashboard.py --post          # post Slack digest (#forensic-flags) + save day-over-day snapshot
-python dashboard.py --post --html   # both (what the daily workflow runs)
-python dashboard.py --per-day 6 --cycle-start 2026-06-20
+python -m forensic_triage.dashboard                 # plaintext to stdout (dry-run; no post, no snapshot)
+python -m forensic_triage.dashboard --html   # + write "Forensic Reports/coverage_dashboard.html"
+python -m forensic_triage.dashboard --post          # post Slack digest (#forensic-flags) + save day-over-day snapshot
+python -m forensic_triage.dashboard --post --html   # both (what the daily workflow runs)
+python -m forensic_triage.dashboard --per-day 6 --cycle-start 2026-06-20
 ```
 
 - **Rings** (disjoint, priority order): Portfolio → Researching → Core coverage → S&P 500
@@ -169,7 +169,7 @@ When the user says "run forensic triage" or similar:
 
 ### "A few each day" cadence (Path B, interactive)
 The full universe (~274 domestic names) is screened a **few at a time** across interactive
-sessions, not one big run. `python next_batch.py [-n 6]` is the daily driver: it prints the next
+sessions, not one big run. `python -m forensic_triage.next_batch [-n 6]` is the daily driver: it prints the next
 batch of un-screened names (core-first → hc_services → medtech → general), the progress
 (`X/274 this cycle`), and the foreign Data-Gap count. A name is "done this cycle" once it has a
 `flags_history.csv` row dated ≥ the cycle-start (default `2026-06-20`, the recalibration baseline);
@@ -178,7 +178,7 @@ batch (Steps 1–5 below), append rows to `flags_history.csv`, write/append the 
 filers never appear in the batch (they're Data Gap, not EDGAR-screened).
 
 ### Step 0: Sync watchlist
-Run `python sync_watchlist.py` first. Note any adds/removes/subgroup changes — new names get an automatic Yellow tier on their first appearance (no flag history to compare against, so flag them for a baseline read).
+Run `python -m forensic_triage.sync_watchlist` first. Note any adds/removes/subgroup changes — new names get an automatic Yellow tier on their first appearance (no flag history to compare against, so flag them for a baseline read).
 
 ### Step 1: Pull data
 **First, route `filer_type=foreign` names straight to Data Gap** — do NOT spend EDGAR calls on them; the 10-K-based rubric can't evaluate a 20-F/IFRS filer. List them under the Data Gap section of the report for manual review.
@@ -232,7 +232,7 @@ Based on the watchlist `sector_subgroup` column, apply the matching rubric:
 - Write to `data/flags_history.csv` with the run date
 
 ### Step 5: Report
-Write a markdown report to `reports/forensic_YYYY-MM-DD.md`:
+Write a markdown report to `Forensic Reports/forensic_YYYY-MM-DD.md`:
 
 ```
 # Forensic Triage — {date}
@@ -287,7 +287,7 @@ sbc_pct_revenue, goodwill_pct_assets, ... (sector-specific columns appended)
 - **edgartools MCP** — primary data source. Prefer this over web search for any financial ratio or filing question. **Requires Pro tier** ($24.99/mo at https://app.edgar.tools/pricing) — see "Edgar-Tools tier requirements" below.
 - **WebSearch** — only for things EDGAR doesn't have (short interest, borrow cost, recent press)
 - **File tools** — read/write CSVs and reports directly
-- **Bash** — `python sync_watchlist.py` before every triage run
+- **Bash** — `python -m forensic_triage.sync_watchlist` before every triage run
 
 ## Edgar-Tools tier requirements
 

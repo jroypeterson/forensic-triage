@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 CM_EXPORTS = ROOT.parent / "Coverage Manager" / "exports"
 SP500_FILE = ROOT.parent / "sigma-alert" / "sources" / "sp500.txt"
 

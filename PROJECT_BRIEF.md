@@ -132,9 +132,9 @@ on 1-2 names), then flipping the cron on and disabling the old claude.ai trigger
   excessive false positives.
 - **Only deterministic code:** `sync_watchlist.py` (CM→watchlist ETL, US/CIK
   gate, biopharma exclusion, subgroup mapping, notes preservation). Run
-  `python sync_watchlist.py --dry-run` to see adds/removes without writing.
+  `python -m forensic_triage.sync_watchlist --dry-run` to see adds/removes without writing.
   There are no unit tests to run.
-- **Worked example:** `reports/forensic_2026-04-17_smoketest.md` and the
+- **Worked example:** `Forensic Reports/forensic_2026-04-17_smoketest.md` and the
   matching rows in `data/flags_history.csv` show the screen's output on the
   8-ticker calibration (note the AHCO Red-tier and the DXCM/TMDX accruals
   catches).

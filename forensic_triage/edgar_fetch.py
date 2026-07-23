@@ -19,7 +19,7 @@ The single most important property of this module is the FALSE-GREEN GUARD:
 Staleness is computed from FILING DATES / period-end (codex R1 #7), NOT fiscal-year age.
 
 CLI:
-  python edgar_fetch.py TICKER [--cik 0000320193] [--out data/fetched]
+  python -m forensic_triage.edgar_fetch TICKER [--cik 0000320193] [--out data/fetched]
 
 This module does NOT decide tiers. It only gathers + classifies coverage. `tier_batch.py`
 consumes the JSON; `forensic_tier.py` makes the final deterministic decision.
@@ -35,9 +35,9 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from forensic_schema import COVERAGE, FAMILIES, SCHEMA_VERSION, required_families
+from .forensic_schema import COVERAGE, FAMILIES, SCHEMA_VERSION, required_families
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
 DEFAULT_OUT_DIR = ROOT / "data" / "fetched"
 

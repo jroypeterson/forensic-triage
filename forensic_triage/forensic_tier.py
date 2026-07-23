@@ -24,7 +24,7 @@ known signal; and "incomplete required coverage" can never land Green.
 """
 from __future__ import annotations
 
-from forensic_schema import (
+from .forensic_schema import (
     COVERAGE_OK_FOR_GREEN,
     FAMILIES,
     required_families,

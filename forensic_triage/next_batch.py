@@ -17,9 +17,9 @@ as complete (back-compat). Foreign filers (filer_type=foreign) are never screene
 EDGAR — they belong to the Data Gap tier — so they're excluded here and reported separately.
 
 Usage:
-  python next_batch.py            # show the next batch (default 8) + progress
-  python next_batch.py -n 5       # batch of 5
-  python next_batch.py --cycle-start 2026-06-20
+  python -m forensic_triage.next_batch            # show the next batch (default 8) + progress
+  python -m forensic_triage.next_batch -n 5       # batch of 5
+  python -m forensic_triage.next_batch --cycle-start 2026-06-20
 """
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ import argparse
 import csv
 from pathlib import Path
 
-import coverage_cohorts as cc
+from . import coverage_cohorts as cc
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
 FLAGS_HISTORY_CSV = ROOT / "data" / "flags_history.csv"
 

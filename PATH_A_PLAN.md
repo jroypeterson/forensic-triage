@@ -68,8 +68,8 @@ retries, durable logs, secret management, `concurrency` locks, pinned Python, fa
 Pipeline per run:
 1. `concurrency: forensic-triage` (no overlapping runs). Checkout repo.
 2. `pip install -r requirements.txt`.
-3. `python next_batch.py` → next N domestic names (committed watchlist; see §sync).
-4. For each: `python edgar_fetch.py TICKER` → JSON.
+3. `python -m forensic_triage.next_batch` → next N domestic names (committed watchlist; see §sync).
+4. For each: `python -m forensic_triage.edgar_fetch TICKER` → JSON.
 5. **Tiering = Anthropic API call** (Claude reads `rubrics/*.md` + the JSON, returns **structured
    output** = per-family flags + tier + concerns). Judgment stays in the model (R1 #10) — but wrapped
    by **deterministic guardrails**: ratio math, Data-Gap/Corporate-Action precedence, critical-gov

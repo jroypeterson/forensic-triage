@@ -10,8 +10,8 @@ Rules:
   - Preserve manual `notes` and original `added_date` for tickers that survive
   - Report adds / removes / subgroup changes to stdout
 
-Run:  python sync_watchlist.py
-      python sync_watchlist.py --dry-run
+Run:  python -m forensic_triage.sync_watchlist
+      python -m forensic_triage.sync_watchlist --dry-run
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
 
 # SEC ticker->CIK map, used to resolve CIKs for the S&P 500 names that expand the
@@ -254,7 +254,7 @@ def build_sp500_extras(
     """Rows for the S&P 500 expansion ring: roster-priority names NOT in the CM
     master. Returns (rows, added_tickers, unresolved_no_cik)."""
     try:
-        import coverage_cohorts as cc
+        from . import coverage_cohorts as cc
     except Exception as e:
         print(f"WARNING: coverage_cohorts unavailable ({e}); skipping S&P 500 expansion.",
               file=sys.stderr)
@@ -327,7 +327,7 @@ def main() -> int:
 
     existing = load_existing_watchlist()
     try:
-        import coverage_cohorts as cc
+        from . import coverage_cohorts as cc
         large_cap = cc.load_sp500()  # S&P 500 = large-cap proxy for biopharma inclusion
     except Exception:
         large_cap = set()
@@ -362,7 +362,7 @@ def main() -> int:
     # rather than persist a mis-partitioned universe.
     cohort_totals: dict[str, int] = {}
     try:
-        import coverage_cohorts as cc
+        from . import coverage_cohorts as cc
         rosters = cc.load_rosters()
     except Exception as e:
         print(f"ERROR: coverage_cohorts unavailable ({e}); cannot bake cohorts — refusing "

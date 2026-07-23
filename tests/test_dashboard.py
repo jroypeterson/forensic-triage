@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import coverage_cohorts as cc  # noqa: E402
-import dashboard  # noqa: E402
+from forensic_triage import coverage_cohorts as cc  # noqa: E402
+from forensic_triage import dashboard  # noqa: E402
 
 
 # --- cohort priority (disjoint rings) ---

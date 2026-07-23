@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import tier_batch  # noqa: E402
-from forensic_schema import FAMILIES, HISTORY_COLUMNS  # noqa: E402
+from forensic_triage import tier_batch  # noqa: E402
+from forensic_triage.forensic_schema import FAMILIES, HISTORY_COLUMNS  # noqa: E402
 
 
 def _flags(*fired):

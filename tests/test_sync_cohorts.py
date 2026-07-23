@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import coverage_cohorts as cc  # noqa: E402
-import next_batch as nb  # noqa: E402
-import sync_watchlist as sw  # noqa: E402
+from forensic_triage import coverage_cohorts as cc  # noqa: E402
+from forensic_triage import next_batch as nb  # noqa: E402
+from forensic_triage import sync_watchlist as sw  # noqa: E402
 
 
 def test_ckey_folds_class_punctuation():

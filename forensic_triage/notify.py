@@ -162,7 +162,7 @@ if __name__ == "__main__":  # pragma: no cover — manual smoke (prints blocks, 
     ap.parse_args()
     demo = [
         {"ticker": "ACME", "subgroup": "hc_services", "tier": "Red", "reason": "critical governance (auto-Red)",
-         "flags": {f: 0 for f in __import__("forensic_schema").FAMILIES}, "concerns": ["8-K 4.02 non-reliance filed 2026-05"]},
+         "flags": {f: 0 for f in __import__("forensic_triage.forensic_schema", fromlist=["FAMILIES"]).FAMILIES}, "concerns": ["8-K 4.02 non-reliance filed 2026-05"]},
     ]
     print(json.dumps({"blocks": build_forensic_blocks(demo, run_id="demo", run_date="2026-06-24")}, indent=2))
     print(json.dumps({"blocks": build_heartbeat_blocks(run_id="demo", run_date="2026-06-24",

@@ -4,8 +4,8 @@
 - **Status:** live (interactive is the source-of-truth mode; the Saturday remote trigger runs degraded without MCPs)
 - **Runtime/trigger:** Claude-driven on-demand (interactive) · scheduled remote CCR trigger (Sat 09:00 ET)
 - **Reads:** Coverage Manager `coverage_universe_tickers.csv` (synced) · edgartools MCP (snapshots / statements / trends / events / notes) · WebSearch (insider / short interest)
-- **Writes:** `data/{watchlist,flags_history,ratios_latest}.csv` · `reports/forensic_<date>.md` · Slack `#forensic-flags` (heartbeat)
-- **Run:** `python sync_watchlist.py`, then Claude runs the 5-step workflow  ·  **Entry points:** `sync_watchlist.py`, `CLAUDE.md`, `rubrics/`
+- **Writes:** `data/{watchlist,flags_history,ratios_latest}.csv` · `Forensic Reports/forensic_<date>.md` · Slack `#forensic-flags` (heartbeat)
+- **Run:** `python -m forensic_triage.sync_watchlist`, then Claude runs the 5-step workflow  ·  **Entry points:** `run_unattended.py` (root launcher), `python -m forensic_triage.sync_watchlist`, `CLAUDE.md`, `rubrics/`
 
 Claude-driven forensic accounting screen for a coverage universe of US-listed companies. Surfaces names with accounting irregularities or quality-of-earnings concerns worth a deep dive — output is **flagged companies + the specific concerns**, not a single composite score.
 
@@ -25,7 +25,7 @@ forensic_triage/
     general.md              # 8 universal flag families
     healthcare_services.md  # 9 HC services-specific flag families
     medtech.md              # 9 medtech-specific flag families
-  reports/                  # Generated weekly triage reports
+  Forensic Reports/         # Generated weekly triage reports (human-facing)
 ```
 
 ## Watchlist sync
@@ -33,12 +33,12 @@ forensic_triage/
 The watchlist is derived from the [Coverage-Manager](https://github.com/jroypeterson/Coverage-Manager) repo. Re-sync before every triage:
 
 ```bash
-python sync_watchlist.py            # write
-python sync_watchlist.py --dry-run  # report only
+python -m forensic_triage.sync_watchlist            # write
+python -m forensic_triage.sync_watchlist --dry-run  # report only
 ```
 
 By default the script looks for the coverage CSV at `../Coverage Manager/data/coverage_universe_tickers.csv` (sibling-folder layout). For the remote weekly trigger, set `FORENSIC_COVERAGE_CSV` to point at the cloned coverage CSV.
 
 ## Weekly schedule
 
-A scheduled remote Claude trigger runs the full triage every Saturday morning. It syncs the watchlist, applies the rubrics via the EDGAR Tools MCP, writes a dated markdown report under `reports/`, posts a one-line summary to Slack `#forensic-flag`, and commits the updated `flags_history.csv` and report back to this repo.
+A scheduled remote Claude trigger runs the full triage every Saturday morning. It syncs the watchlist, applies the rubrics via the EDGAR Tools MCP, writes a dated markdown report under `Forensic Reports/`, posts a one-line summary to Slack `#forensic-flag`, and commits the updated `flags_history.csv` and report back to this repo.

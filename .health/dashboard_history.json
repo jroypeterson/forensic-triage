@@ -306,5 +306,19 @@
       "sp500": 0,
       "other": 0
     }
+  },
+  {
+    "date": "2026-08-05",
+    "screened": 150,
+    "pending": 533,
+    "red": 16,
+    "yellow": 104,
+    "by_cohort": {
+      "portfolio": 16,
+      "researching": 11,
+      "core": 123,
+      "sp500": 0,
+      "other": 0
+    }
   }
 ]

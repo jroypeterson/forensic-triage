@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 
@@ -102,9 +103,43 @@ def build_forensic_blocks(results: list[dict], *, run_id: str, run_date: str, co
 
 def post_forensic(results: list[dict], *, run_id: str, run_date: str, commit: str = "",
                   webhook_url: str | None = None) -> tuple[bool, str]:
+    """Publish the digest, split across messages if it would break Slack's ceiling.
+
+    `build_forensic_blocks` appends ONE section per ticker across four tiers, so the
+    block count scales with how many names were flagged. Today the lane posts only the
+    day's incremental batch (14-16 blocks, verified in #forensic-flags), but a backfill
+    of the ~541 pending would build ~550 blocks and Slack would reject the entire
+    digest with `invalid_blocks` -- an error that names nothing -- on the run carrying
+    the most findings.
+
+    A WEBHOOK has no message `ts`, so continuations cannot be threaded the way a
+    `chat.postMessage` lane would do it; they go as separate messages, numbered so a
+    reader knows the digest continues.
+    """
+    from . import block_ceiling
+
     url = webhook_url if webhook_url is not None else os.environ.get(FORENSIC_ENV, "")
-    blocks = build_forensic_blocks(results, run_id=run_id, run_date=run_date, commit=commit)
-    return _post(url, {"blocks": blocks})
+    blocks = build_forensic_blocks(results, run_id=run_id, run_date=run_date,
+                                   commit=commit)
+
+    for problem in block_ceiling.problems(blocks):
+        # `invalid_blocks` names nothing, so name it before Slack is asked.
+        print(f"[forensic_triage] Block Kit: {problem}", file=sys.stderr)
+
+    chunks = block_ceiling.chunk(blocks)
+    if len(chunks) == 1:
+        return _post(url, {"blocks": blocks})
+
+    oks, details = [], []
+    for i, part in enumerate(chunks, 1):
+        head = [{"type": "context", "elements": [{"type": "mrkdwn",
+                 "text": f"_Forensic Triage {run_date} — part {i} of {len(chunks)}_"}]}]
+        ok, detail = _post(url, {"blocks": head + part})
+        oks.append(ok)
+        details.append(f"part {i}: {detail}")
+    # Partial delivery is a FAILED post: the reader is missing flagged tickers, and
+    # the caller must be able to tell that from a clean run.
+    return all(oks), f"{sum(oks)}/{len(chunks)} parts delivered · " + " · ".join(details)
 
 
 # --------------------------------------------------------------------------------------

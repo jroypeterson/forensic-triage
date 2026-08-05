@@ -394,3 +394,30 @@ if, after a few interactive full/core cycles, missed runs become a real problem.
 1. Add the `edgartools` Python package + a helper that pulls all required per-ticker data as JSON (replaces the MCP data layer)
 2. Add a Slack webhook + `curl` post (replaces the Slack MCP)
 3. Update the trigger prompt to call the helper instead of MCP tools
+
+## 🧱 Block Kit ceiling guard (2026-08-04, board #268 family)
+
+`build_forensic_blocks` appends **one section block per ticker** across four tiers, so the
+block count scales with how many names were flagged.
+
+**This is not a live failure, and that was checked before acting.** The cumulative dashboard
+shows 13 red + 100 yellow, which reads as ~123 blocks against a limit of 50 — but the lane
+posts only the day's **incremental batch**, and `#forensic-flags` confirms 14–16 blocks per
+run. Those are different numbers and confusing them nearly produced a "fix" to a working lane.
+
+**The risk is conditional and measured, not estimated.** `pending` is 541 and drains ~4/day,
+so a backfill or catch-up run that processes the queue in one pass builds **546 blocks**, and
+Slack rejects the whole digest with `invalid_blocks` — an error that names nothing — on the
+run carrying the most findings. It now splits into 12 parts with all 546 preserved.
+
+- **Splits, never truncates.** A shorter digest drops flagged tickers, and the dropped ones
+  would be the tail tiers (DataGap, CorporateAction) rather than the Reds — invisible to a
+  reader scanning the top, which is the worst shape of loss.
+- **`block_ceiling.py` is VENDORED, not a shim to `_shared/`** — this project runs in GitHub
+  Actions where the Dropbox sibling is not checked out, and a shim would go silently inert in
+  CI while the docs claimed coverage.
+- **A webhook has no message `ts`,** so continuations cannot thread; they post as separate
+  numbered messages. **Partial delivery returns FAILED** — the reader is missing flagged
+  tickers and the caller must be able to tell that from a clean run.
+- A digest under the ceiling still posts **exactly once**, pinned by a test, because a guard
+  that changes the normal path is a new bug.

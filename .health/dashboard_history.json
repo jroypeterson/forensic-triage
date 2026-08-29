@@ -603,15 +603,15 @@
   },
   {
     "date": "2026-08-29",
-    "screened": 227,
-    "pending": 456,
+    "screened": 230,
+    "pending": 453,
     "red": 22,
-    "yellow": 167,
+    "yellow": 169,
     "by_cohort": {
       "portfolio": 16,
       "researching": 11,
       "core": 161,
-      "sp500": 39,
+      "sp500": 42,
       "other": 0
     }
   }

@@ -14,7 +14,8 @@ Rosters read (all free, local files):
   - portfolio    <- Coverage Manager/exports/portfolio.json      (keys = tickers)
   - researching  <- Coverage Manager/exports/researching.json
   - core         <- Coverage Manager/exports/universe_metadata.json  (core == "Y")
-  - sp500        <- sigma-alert/sources/sp500.txt                 (one ticker/line)
+  - sp500        <- Coverage Manager/data/index_membership/sp500_latest.json
+                   (board #354; sigma-alert/sources/sp500.txt is the fallback)
 
 `other` = a name in forensic's watchlist that is in none of the four rings (a CM
 coverage name that is not Portfolio/Researching/Core and not in the S&P 500). It's
@@ -27,7 +28,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 CM_EXPORTS = ROOT.parent / "Coverage Manager" / "exports"
+SP500_SNAPSHOT = (ROOT.parent / "Coverage Manager" / "data" /
+                  "index_membership" / "sp500_latest.json")
+# The retiring second copy; read only when the snapshot is unusable.
 SP500_FILE = ROOT.parent / "sigma-alert" / "sources" / "sp500.txt"
+# Below this the snapshot is refused rather than used: a short S&P list does not
+# fail here, it demotes real S&P names into the `other` residual ring.
+SP500_MIN_PLAUSIBLE = 400
+SP500_MAX_AGE_DAYS = 45
 
 # Priority order, widest ring last. `other` is the residual bucket.
 COHORT_ORDER = ["portfolio", "researching", "core", "sp500", "other"]
@@ -77,7 +85,26 @@ def load_core() -> set[str]:
 
 
 def load_sp500() -> set[str]:
-    """S&P 500 tickers from sigma-alert's Wikipedia-scrape source file."""
+    """S&P 500 tickers, from Coverage Manager's index-membership snapshot.
+
+    Board #354 step 4. The snapshot lane shipped 2026-09-08 and `sector_chart_pack`
+    and `screens_equity` both read it; `sigma-alert/sources/sp500.txt` is the retiring
+    second copy and stays here only as a fallback.
+
+    ⛑ **An empty return is a real answer here, not an error**, and that is why the
+    plausibility floor matters. `sp500` is the widest ring: a name in no other roster
+    lands in `other`, so a SHORT S&P list does not fail, it silently demotes real S&P
+    names into the residual bucket and changes which companies get screened first.
+    Measured before migrating: the snapshot and the text file agreed on 503 of 503
+    names, so this is a verified no-op today.
+
+    Returns `set()` when neither source exists -- the caller already treats an empty
+    roster as fatal for a sync (see the module docstring), and inventing membership
+    would be worse than saying nothing.
+    """
+    names = _sp500_from_snapshot()
+    if names is not None:
+        return names
     if not SP500_FILE.exists():
         return set()
     out: set[str] = set()
@@ -87,6 +114,35 @@ def load_sp500() -> set[str]:
             continue
         out.add(_norm(line))
     return out
+
+
+def _sp500_from_snapshot() -> set[str] | None:
+    """The CM snapshot, or None if it is absent, unreadable, short or stale.
+
+    None means "use the fallback", never "the index is empty".
+    """
+    import datetime
+
+    if not SP500_SNAPSHOT.exists():
+        return None
+    try:
+        doc = json.loads(SP500_SNAPSHOT.read_text(encoding="utf-8"))
+        names = {_norm(h["ticker"]) for h in doc.get("holdings") or []
+                 if isinstance(h, dict) and h.get("ticker")}
+    except (ValueError, KeyError, TypeError):
+        return None
+    if len(names) < SP500_MIN_PLAUSIBLE:
+        return None
+    as_of = str(doc.get("as_of") or "")
+    if as_of:
+        try:
+            age = (datetime.date.today()
+                   - datetime.date.fromisoformat(as_of[:10])).days
+        except ValueError:
+            return None
+        if age > SP500_MAX_AGE_DAYS:
+            return None
+    return names
 
 
 def load_rosters() -> dict[str, set[str]]:

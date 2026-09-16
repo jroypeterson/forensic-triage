@@ -178,3 +178,58 @@ def test_plaintext_renders(monkeypatch):
     blocks, fallback = dashboard.build_blocks(data)
     assert blocks and fallback
     assert "<table" in dashboard.render_html(data)
+
+
+# --- S&P 500 membership from Coverage Manager (board #354 step 4) --------------
+
+def _cm_snapshot(tmp_path, n=503, as_of=None):
+    import datetime, json
+    as_of = as_of or datetime.date.today().isoformat()
+    p = tmp_path / "sp500_latest.json"
+    p.write_text(json.dumps({"as_of": as_of,
+                             "holdings": [{"ticker": f"T{i}"} for i in range(n)]}),
+                 encoding="utf-8")
+    return p
+
+
+def test_sp500_prefers_the_cm_snapshot(tmp_path, monkeypatch):
+    from forensic_triage import coverage_cohorts as cc
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", _cm_snapshot(tmp_path))
+    sentinel = tmp_path / "sp500.txt"
+    sentinel.write_text("SHOULDNOTBEREAD", encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_FILE", sentinel)
+    got = cc.load_sp500()
+    assert len(got) == 503 and "SHOULDNOTBEREAD" not in got
+
+
+def test_a_short_snapshot_falls_back_rather_than_demoting_the_index(tmp_path, monkeypatch):
+    """⛑ `sp500` is the WIDEST ring, so a short list does not fail — it silently
+    demotes real S&P names into the `other` residual bucket and changes which
+    companies get screened first. That is why the floor exists."""
+    from forensic_triage import coverage_cohorts as cc
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", _cm_snapshot(tmp_path, n=9))
+    fb = tmp_path / "sp500.txt"
+    fb.write_text("\n".join(f"F{i}" for i in range(503)), encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_FILE", fb)
+    got = cc.load_sp500()
+    assert len(got) == 503 and any(t.startswith("F") for t in got)
+
+
+def test_a_stale_snapshot_falls_back(tmp_path, monkeypatch):
+    import datetime
+    from forensic_triage import coverage_cohorts as cc
+    old = (datetime.date.today()
+           - datetime.timedelta(days=cc.SP500_MAX_AGE_DAYS + 1)).isoformat()
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", _cm_snapshot(tmp_path, as_of=old))
+    fb = tmp_path / "sp500.txt"
+    fb.write_text("\n".join(f"F{i}" for i in range(503)), encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_FILE", fb)
+    assert any(t.startswith("F") for t in cc.load_sp500())
+
+
+def test_neither_source_returns_EMPTY_not_a_guess(tmp_path, monkeypatch):
+    """An empty roster is fatal for a sync by contract; inventing membership is worse."""
+    from forensic_triage import coverage_cohorts as cc
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", tmp_path / "nope.json")
+    monkeypatch.setattr(cc, "SP500_FILE", tmp_path / "nope.txt")
+    assert cc.load_sp500() == set()

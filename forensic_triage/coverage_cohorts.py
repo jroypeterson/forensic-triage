@@ -102,47 +102,68 @@ def load_sp500() -> set[str]:
     roster as fatal for a sync (see the module docstring), and inventing membership
     would be worse than saying nothing.
     """
-    names = _sp500_from_snapshot()
+    names, why = _sp500_from_snapshot()
     if names is not None:
         return names
     if not SP500_FILE.exists():
+        print(f"  WARN: S&P 500 snapshot {why} and no fallback at {SP500_FILE}; "
+              f"the sp500 ring will be EMPTY")
         return set()
+    # ⛑ SAY WHICH SOURCE SERVED. A silent fallback is how a dead source stays invisible
+    # -- the fleet has already paid for that once, and it is the precise state this
+    # migration exists to end: two lists, two cadences, nothing announcing which one is
+    # in play. When the text file is finally retired this branch becomes the empty ring
+    # above, and going quiet about it would drop the whole S&P cohort with a green run.
+    print(f"  WARN: S&P 500 snapshot {why}; falling back to {SP500_FILE.name}")
     out: set[str] = set()
     for line in SP500_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         out.add(_norm(line))
+    # The floor applies to the FALLBACK too; a half-written monthly refresh would
+    # otherwise demote real S&P names into the residual ring with nothing reported.
+    if 0 < len(out) < SP500_MIN_PLAUSIBLE:
+        print(f"  WARN: {SP500_FILE.name} has only {len(out)} names (expected ~503); "
+              f"treating the S&P ring as UNKNOWN rather than short")
+        return set()
     return out
 
 
-def _sp500_from_snapshot() -> set[str] | None:
-    """The CM snapshot, or None if it is absent, unreadable, short or stale.
-
-    None means "use the fallback", never "the index is empty".
-    """
+def _sp500_from_snapshot() -> tuple[set[str] | None, str]:
+    """(members, reason). `None` means "use the fallback", never "the index is empty"."""
     import datetime
 
     if not SP500_SNAPSHOT.exists():
-        return None
+        return None, "absent"
     try:
         doc = json.loads(SP500_SNAPSHOT.read_text(encoding="utf-8"))
         names = {_norm(h["ticker"]) for h in doc.get("holdings") or []
                  if isinstance(h, dict) and h.get("ticker")}
-    except (ValueError, KeyError, TypeError):
-        return None
+    # ⛑ OSError belongs here. Without it a Dropbox lock on the snapshot -- WinError 5,
+    # the most common IO failure in this workspace -- propagates out of `load_rosters()`
+    # into `dashboard.py` and `next_batch.py`, neither of which wraps the call, instead
+    # of taking the fallback. Note `_load_json_keys` and `load_core` in this same file
+    # already catch broadly; this reader was the odd one out (review, 2026-09-16).
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return None, f"unreadable ({type(exc).__name__}: {exc})"
     if len(names) < SP500_MIN_PLAUSIBLE:
-        return None
+        return None, f"only {len(names)} names (expected ~503)"
     as_of = str(doc.get("as_of") or "")
-    if as_of:
-        try:
-            age = (datetime.date.today()
-                   - datetime.date.fromisoformat(as_of[:10])).days
-        except ValueError:
-            return None
-        if age > SP500_MAX_AGE_DAYS:
-            return None
-    return names
+    if not as_of:
+        return None, "carries no as_of date"   # undatable is not "never stale"
+    # CM writes `stale_days` per index; read it rather than keeping a local copy that
+    # drifts the day CM changes it.
+    limit = doc.get("stale_days")
+    if not isinstance(limit, int) or limit <= 0:
+        limit = SP500_MAX_AGE_DAYS
+    try:
+        age = (datetime.date.today() - datetime.date.fromisoformat(as_of[:10])).days
+    except ValueError:
+        return None, f"unparseable as_of {as_of!r}"
+    if age > limit:
+        return None, f"as_of {as_of} is {age}d old (limit {limit})"
+    return names, "ok"
 
 
 def load_rosters() -> dict[str, set[str]]:

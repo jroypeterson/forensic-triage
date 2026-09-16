@@ -233,3 +233,51 @@ def test_neither_source_returns_EMPTY_not_a_guess(tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "SP500_SNAPSHOT", tmp_path / "nope.json")
     monkeypatch.setattr(cc, "SP500_FILE", tmp_path / "nope.txt")
     assert cc.load_sp500() == set()
+
+
+def test_a_LOCKED_snapshot_falls_back_instead_of_propagating(tmp_path, monkeypatch, capsys):
+    """⛑ `_load_json_keys` and `load_core` in this same file already catch broadly;
+    this reader was the odd one out, so a Dropbox lock (WinError 5) propagated out of
+    `load_rosters()` into `dashboard.py` and `next_batch.py`, neither of which wraps
+    the call (review, 2026-09-16)."""
+    import pathlib
+    from forensic_triage import coverage_cohorts as cc
+    snap = tmp_path / "sp500_latest.json"
+    snap.write_text("{}", encoding="utf-8")
+    fb = tmp_path / "sp500.txt"
+    fb.write_text("\n".join(f"F{i}" for i in range(503)), encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", snap)
+    monkeypatch.setattr(cc, "SP500_FILE", fb)
+
+    orig = pathlib.Path.read_text
+
+    def locked(self, *a, **kw):
+        if self.name.endswith("_latest.json"):
+            raise PermissionError(13, "locked")
+        return orig(self, *a, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", locked)
+    got = cc.load_sp500()
+    assert len(got) == 503
+    assert "PermissionError" in capsys.readouterr().out
+
+
+def test_the_fallback_is_announced(tmp_path, monkeypatch, capsys):
+    from forensic_triage import coverage_cohorts as cc
+    fb = tmp_path / "sp500.txt"
+    fb.write_text("\n".join(f"F{i}" for i in range(503)), encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", tmp_path / "absent.json")
+    monkeypatch.setattr(cc, "SP500_FILE", fb)
+    cc.load_sp500()
+    assert "falling back" in capsys.readouterr().out
+
+
+def test_a_short_FALLBACK_is_unknown_not_short(tmp_path, monkeypatch):
+    """A half-written monthly refresh would otherwise demote real S&P names into the
+    residual ring with nothing reported."""
+    from forensic_triage import coverage_cohorts as cc
+    fb = tmp_path / "sp500.txt"
+    fb.write_text("AAA\nBBB\n", encoding="utf-8")
+    monkeypatch.setattr(cc, "SP500_SNAPSHOT", tmp_path / "absent.json")
+    monkeypatch.setattr(cc, "SP500_FILE", fb)
+    assert cc.load_sp500() == set()

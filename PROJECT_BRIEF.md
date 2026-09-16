@@ -1,6 +1,8 @@
 # Project Brief — read this first (for reviewers, human or AI)
 
-> 🚧 **Maturity: Work in progress.** This project is partially built / not yet in routine production use. Review it for **direction and approach, not production hardening** — don't over-invest in edge-case, test-coverage, or polish feedback. §2 (status) and §5 (gaps) mark what's intentionally unbuilt.
+> ✅ **Maturity: LIVE — a standing daily process.** Path A runs unattended in GitHub Actions at 18:30 UTC daily and posts its heartbeat to `#status-reports`; its Red/Yellow verdicts are consumed downstream by `focus_today`. **Review the production path first** — the screen itself, the tier assignment, and anything that decides a company is flagged. A wrong verdict here propagates into the daily digest JP reads. §2 (status) and §5 (gaps) mark what is still intentionally unbuilt, and those parts remain direction-and-approach feedback.
+>
+> ⛑ **Corrected 2026-09-16.** This banner read *"Work in progress … not yet in routine production use … don't over-invest in edge-case, test-coverage, or polish feedback"* while the lane ran unattended every day and fed another lane's output. `scripts/codex_loop.sh` makes this file the first thing a reviewer reads, so it was telling every review to discount the path that was running — the same class as the 46-day `agentic_trading` "PAPER-only" banner behind board row #319. Found by `scripts/brief_status_claims.py`.
 
 > **Staleness -- check before trusting any figure below.** This file is not auto-updated:
 > `python ../scripts/audit_project_briefs.py --repo "forensic_triage"` counts the behaviour-changing

@@ -147,8 +147,13 @@ def post_forensic(results: list[dict], *, run_id: str, run_date: str, commit: st
 # --------------------------------------------------------------------------------------
 def build_heartbeat_blocks(*, run_id: str, run_date: str, n_screened: int, counts: dict,
                            missing_required: int, commit: str = "", ok: bool = True,
-                           note: str = "") -> list[dict]:
-    status = ":white_check_mark: healthy" if ok else ":rotating_light: FAILED"
+                           note: str = "", degraded: bool = False) -> list[dict]:
+    if not ok:
+        status = ":rotating_light: FAILED"
+    elif degraded:  # ran, but a judgment fell back / failed - the note says which
+        status = ":warning: DEGRADED"
+    else:
+        status = ":white_check_mark: healthy"
     tier_line = "  ".join(f"{t}: {counts.get(t, 0)}" for t in
                           ("Red", "Yellow", "Green", "DataGap", "CorporateAction"))
     lines = [
@@ -169,11 +174,11 @@ def build_heartbeat_blocks(*, run_id: str, run_date: str, n_screened: int, count
 
 def post_heartbeat(*, run_id: str, run_date: str, n_screened: int, counts: dict,
                    missing_required: int, commit: str = "", ok: bool = True, note: str = "",
-                   webhook_url: str | None = None) -> tuple[bool, str]:
+                   webhook_url: str | None = None, degraded: bool = False) -> tuple[bool, str]:
     url = webhook_url if webhook_url is not None else os.environ.get(STATUS_ENV, "")
     blocks = build_heartbeat_blocks(
         run_id=run_id, run_date=run_date, n_screened=n_screened, counts=counts,
-        missing_required=missing_required, commit=commit, ok=ok, note=note,
+        missing_required=missing_required, commit=commit, ok=ok, note=note, degraded=degraded,
     )
     return _post(url, {"blocks": blocks})
 

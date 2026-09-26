@@ -87,8 +87,16 @@ def run_screen(*, batch_size: int, run_id: str, cycle_start: str) -> int:
         edgar_fetch.write_record(rec, edgar_fetch.DEFAULT_OUT_DIR)
 
         # 2. tier (Anthropic judge + deterministic guardrails)
-        res = tier_batch.tier_one(rec, subgroup=subgroup, is_new=(ticker in new_set),
-                                  prior_flags=prior_flags.get(ticker))
+        try:
+            res = tier_batch.tier_one(rec, subgroup=subgroup, is_new=(ticker in new_set),
+                                      prior_flags=prior_flags.get(ticker))
+        except tier_batch.JudgeValidationError as exc:
+            # One unusable judgment (refusal through the fallback chain, max_tokens
+            # truncation, malformed output) must not discard the names already judged in
+            # this batch. Recorded as judge_failed: never Green, retried next run, counted by
+            # the circuit breaker. API/transport errors still propagate (broad outage).
+            print(f"WARNING [forensic_triage] {ticker}: judge failed: {exc}", flush=True)
+            res = tier_batch.judge_failed_result(rec, subgroup=subgroup, error=exc)
         results.append(res)
         print(f"  {ticker:<6} {res['tier']:<16} status={res['status']}  {res['reason']}")
 
@@ -108,8 +116,29 @@ def run_screen(*, batch_size: int, run_id: str, cycle_start: str) -> int:
     report_path = _write_report(results, run_id=run_id)
     print(f"\nWrote report {report_path}; appended {len(rows)} history rows.")
 
-    _write_last_run(run_id=run_id, results=results, note="ok", ok=True)
+    note = _model_note(results)
+    _write_last_run(run_id=run_id, results=results, note=note, ok=True, degraded=(note != "ok"))
     return 0
+
+
+def _model_note(results: list[dict]) -> str:
+    """Heartbeat note (also written into the committed report): "ok", or loud lines naming
+    every judgment NOT served normally by tier_batch.MODEL_ID - a refusal/404 fallback served
+    it, the refusal fallback itself was unavailable, or the judge failed outright. Degrading
+    keeps the run useful; saying so keeps it from passing as a normal Fable run."""
+    parts = []
+    off = [f"{r['ticker']}={r['model_served']}" for r in results
+           if r.get("model_served") and r["model_served"] != tier_batch.MODEL_ID]
+    if off:
+        parts.append(f"DEGRADED: {len(off)}/{len(results)} judgments not served by "
+                     f"{tier_batch.MODEL_ID}: {', '.join(off)}")
+    deg = sorted({r["judge_degraded"] for r in results if r.get("judge_degraded")})
+    if deg:
+        parts.append(f"DEGRADED: {'; '.join(deg)}")
+    failed = [r["ticker"] for r in results if r.get("status") == "judge_failed"]
+    if failed:
+        parts.append(f"JUDGE FAILED (not screened, retry next run): {', '.join(failed)}")
+    return "ok" if not parts else " | ".join(parts)
 
 
 def _counts(results: list[dict]) -> dict:
@@ -137,7 +166,8 @@ def _write_report(results: list[dict], *, run_id: str) -> Path:
     REPORTS.mkdir(parents=True, exist_ok=True)
     today = date.today().isoformat()
     path = REPORTS / f"forensic_{today}.md"
-    lines = [f"# Forensic Triage — {today}", "", f"_run_id {run_id}_", ""]
+    lines = [f"# Forensic Triage — {today}", "", f"_run_id {run_id}_", "",
+             f"_judge model {tier_batch.MODEL_ID}: {_model_note(results)}_", ""]
 
     def section(tier: str, title: str):
         names = [r for r in results if r["tier"] == tier]
@@ -168,7 +198,8 @@ def _write_report(results: list[dict], *, run_id: str) -> Path:
     return path
 
 
-def _write_last_run(*, run_id: str, results: list[dict], note: str = "", ok: bool = True) -> None:
+def _write_last_run(*, run_id: str, results: list[dict], note: str = "", ok: bool = True,
+                    degraded: bool = False) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     # Strip the bulky coverage map down for the notify payload; keep what the cards need.
     slim = [
@@ -181,7 +212,7 @@ def _write_last_run(*, run_id: str, results: list[dict], note: str = "", ok: boo
     ]
     payload = {
         "run_id": run_id, "run_date": date.today().isoformat(),
-        "ok": ok, "note": note, "results": slim,
+        "ok": ok, "degraded": degraded, "note": note, "results": slim,
     }
     with LAST_RUN.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -210,9 +241,13 @@ def notify_only(*, run_id: str) -> int:
     ok_f, det_f = notify.post_forensic(results, run_id=run_id, run_date=run_date, commit=commit)
     counts = _counts(results)
     missing = _missing_required(results)
+    # A judge_failed name was not screened: keep it out of "screened" so the heartbeat can't
+    # read "screened 6" when only 3 judgments came back.
+    n_screened = sum(1 for r in results if r.get("status") != "judge_failed")
     ok_h, det_h = notify.post_heartbeat(
-        run_id=run_id, run_date=run_date, n_screened=len(results), counts=counts,
+        run_id=run_id, run_date=run_date, n_screened=n_screened, counts=counts,
         missing_required=missing, commit=commit, ok=data.get("ok", True), note=data.get("note", ""),
+        degraded=data.get("degraded", False),
     )
     print(f"forensic post: ok={ok_f} {det_f}")
     print(f"heartbeat post: ok={ok_h} {det_h}")

@@ -360,8 +360,12 @@ edgartools fallback so an outage can't hide a 4.02).
 - `forensic_schema.py` + `forensic_tier.py` — deterministic false-Green guard + finalizer (pre-existing).
 - `edgar_fetch.py` — per-ticker hybrid fetch → `data/fetched/<TICKER>.json` (hard schema, NEVER raises;
   `not_disclosed` vs `fetch_failed`; date-based staleness; `family_coverage` enum + `required_families_complete`).
-- `tier_batch.py` — Anthropic **Fable-5** structured-output per-family judge (Claude judges families,
-  NOT the final tier) → validate/retry fail-closed → `forensic_tier.finalize_tier()` deterministic
+- `tier_batch.py` — Anthropic structured-output per-family judge on **`claude-fable-5-1`** at effort
+  `high` since 2026-09-25 (board #410; it actually ran on Opus 4.8 from the June Fable outage until
+  then, held by a stale comment). Refusals fall back server-side to Opus 4.8, and a 404 retries on Opus
+  4.8; both print WARNING and mark the heartbeat `DEGRADED`. A name whose judgment fails is recorded
+  `status=judge_failed` (DataGap, retried next run) instead of aborting the batch. Per-name token
+  usage is printed in the Actions log. Claude judges families, NOT the final tier → validate/retry fail-closed → `forensic_tier.finalize_tier()` deterministic
   precedence + Green-gate. Run-level circuit breaker on broad outages. History migration (13→16 cols).
 - `notify.py` — #forensic-flags Block Kit + #status-reports heartbeat (context blocks use `elements[]`).
 - `run_unattended.py` — per-run orchestrator (next_batch → fetch → tier → history → report → notify).

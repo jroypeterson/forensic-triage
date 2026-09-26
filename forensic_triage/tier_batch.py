@@ -2,7 +2,7 @@
 
 Pipeline per ticker (PATH_A_PLAN step 5):
   1. Read rubrics/*.md + the fetched JSON (edgar_fetch.py output).
-  2. Ask Claude (model `claude-fable-5`, MODEL_POLICY: Fable 5 for forensic_triage) for
+  2. Ask Claude (model `MODEL_ID` below, MODEL_POLICY: Fable for forensic_triage) for
      STRUCTURED per-family flags + concerns + governance/severity/corporate-action signals.
      Claude does NOT emit the final tier (codex R2): it judges families, code decides tier.
   3. Validate Claude's structured output (fail-closed: reject/retry on malformed; if it stays
@@ -38,13 +38,30 @@ RUBRICS_DIR = ROOT / "rubrics"
 FETCHED_DIR = ROOT / "data" / "fetched"
 FLAGS_HISTORY_CSV = ROOT / "data" / "flags_history.csv"
 
-# MODEL_POLICY designates Fable 5 for forensic_triage, but Fable 5 is API-access-gated
-# (this account's key 404s: "Claude Fable 5 is not available. Please use Opus 4.8") and is
-# above Opus-tier pricing + 30-day-retention-gated. Opus 4.8 is the API's own prescribed
-# alternative and the fleet default — strong on this structured, rubric-grounded judgment.
-# Revert to claude-fable-5 here if/when Fable 5 API access is granted to the account.
-MODEL_ID = "claude-opus-4-8"
-FALLBACK_MODEL = "claude-opus-4-7"
+# MODEL_POLICY.md routes forensic_triage to Fable ("false negatives costly"). This lane ran on
+# Opus 4.8 from the 2026-06-25 Fable outage until 2026-09-25 because the comment here said
+# Fable 404s on this key; MODEL_POLICY records Fable live again since 2026-07-10, so that
+# comment was stale for 77 days (board #410). Do not restate availability here: the
+# SessionStart model check / `check_model_policy.py --scan` is the authority, and a 404 at
+# runtime degrades LOUDLY to FALLBACK_MODEL (see _create_judge_message), never silently.
+# Fable 5.1 request rules honoured below: no `thinking: disabled` / budget_tokens, no forced
+# tool_choice, no assistant prefill, refusal is a stop_reason (checked before content), and
+# content[0] may be a thinking/fallback block (we scan for the text block).
+MODEL_ID = "claude-fable-5-1"
+# Server-side refusal fallback + 404 fallback. Must be in Fable 5.1's allowed_fallback_models
+# (claude-opus-4-8 / claude-opus-5) AND in MODEL_POLICY's ALLOWED set.
+FALLBACK_MODEL = "claude-opus-4-8"
+# Array-form fallbacks require exactly this header (the "-07-01" header is for fallbacks="default").
+FALLBACK_BETA = "server-side-fallback-2026-06-01"
+# Accuracy-critical scoring: MODEL_POLICY puts forensic_triage on Fable precisely because a
+# false negative is costly, so run it at `high` (the documented floor for intelligence-sensitive
+# work) rather than the `low` the Opus 4.8 stopgap used.
+JUDGE_EFFORT = "high"
+# Thinking shares the max_tokens cap. 20,000 leaves room for high-effort thinking plus the small
+# JSON judgment while staying under the SDK's non-streaming guard (~21,333 tokens at its
+# 128k-tokens/hour estimate). Non-streaming on purpose: a mid-output refusal fallback then
+# omits the declined partial entirely, so the returned text block is always one whole answer.
+JUDGE_MAX_TOKENS = 20000
 MAX_VALIDATION_RETRIES = 2
 
 # Run-level circuit breaker: if more than this FRACTION of the batch could not be evaluated
@@ -182,11 +199,44 @@ def validate_judge_output(obj, ticker: str) -> dict:
 # the Anthropic judge (lazy import; mockable)
 # --------------------------------------------------------------------------------------
 def _extract_json_text(response) -> str:
-    """Pull the first text block out of an Anthropic response object."""
-    for block in getattr(response, "content", []) or []:
-        if getattr(block, "type", None) == "text":
-            return block.text
-    raise JudgeValidationError("no text block in model response")
+    """Pull the answer text out of an Anthropic response object.
+
+    On Fable (thinking always on) content[0] is a `thinking` block, and a server-side fallback
+    adds a `fallback` block, so never index content[0]. Structured output returns exactly one
+    text block; more than one means the shape is not what we contracted for -> fail closed.
+    """
+    texts = [b for b in (getattr(response, "content", []) or [])
+             if getattr(b, "type", None) == "text"]
+    if not texts:
+        raise JudgeValidationError("no text block in model response")
+    if len(texts) > 1:
+        raise JudgeValidationError(f"expected 1 text block, got {len(texts)}")
+    return texts[0].text
+
+
+def build_judge_request(rubric: str, record: dict, *, model: str = MODEL_ID) -> dict:
+    """The Messages API kwargs for one judgment (pure; unit-tested for Fable 5.1 validity)."""
+    ticker = record.get("ticker", "?")
+    system = SYSTEM_PROMPT.format(today=date.today().isoformat())
+    user = (
+        f"{rubric}\n\n---\n\n# FETCHED DATA FOR {ticker}\n\n"
+        f"```json\n{json.dumps(record, indent=2, default=str)[:120000]}\n```\n\n"
+        "Apply the rubric and return the structured per-family judgment."
+    )
+    # `thinking: adaptive` is explicit (not omitted) on purpose: Fable accepts it, and the
+    # server-side fallback re-runs THIS request on FALLBACK_MODEL, where an omitted `thinking`
+    # would mean NO thinking on Opus 4.8. No sampling params, no prefill, no tool_choice.
+    return dict(
+        model=model,
+        max_tokens=JUDGE_MAX_TOKENS,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": JUDGE_EFFORT,
+            "format": {"type": "json_schema", "schema": JUDGE_SCHEMA},
+        },
+    )
 
 
 def call_judge(rubric: str, record: dict, *, client=None, model: str = MODEL_ID) -> dict:
@@ -202,70 +252,112 @@ def call_judge(rubric: str, record: dict, *, client=None, model: str = MODEL_ID)
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
     ticker = record.get("ticker", "?")
-    system = SYSTEM_PROMPT.format(today=date.today().isoformat())
-    user = (
-        f"{rubric}\n\n---\n\n# FETCHED DATA FOR {ticker}\n\n"
-        f"```json\n{json.dumps(record, indent=2, default=str)[:120000]}\n```\n\n"
-        "Apply the rubric and return the structured per-family judgment."
-    )
-
-    # Opus 4.8: adaptive thinking (the build was written for Fable 5's always-on thinking —
-    # preserve that on Opus 4.8 since forensic tiering is accuracy-critical; Opus omits thinking
-    # by default otherwise). No sampling params (they 400 on Opus 4.8). Structured output via
-    # output_config.format (GA on Opus 4.8 — no tool-use needed). max_tokens 16000 leaves room
-    # for thinking + the small JSON judgment without truncating (truncation -> max_tokens stop
-    # -> our fail-closed guard rejects it). Server-side fallbacks stay opt-in for a refusal.
-    base_kwargs = dict(
-        model=model,
-        max_tokens=16000,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-        thinking={"type": "adaptive"},
-        output_config={
-            "effort": "low",
-            "format": {"type": "json_schema", "schema": JUDGE_SCHEMA},
-        },
-    )
+    base_kwargs = build_judge_request(rubric, record, model=model)
 
     last_err = None
     for _ in range(MAX_VALIDATION_RETRIES + 1):
-        response = _create_with_fallback(client, base_kwargs)
-        # Fail CLOSED on ANY abnormal stop, not just refusal: max_tokens (truncated JSON),
+        response, degraded = _create_judge_message(client, base_kwargs)
+        # Fail CLOSED on ANY abnormal stop, checked BEFORE content is read: `refusal` (content
+        # empty or partial), `max_tokens` (thinking + JSON hit the cap -> truncated JSON),
         # pause_turn, etc. mean the structured output did not complete normally, so accepting
-        # it could tier on a partial judgment (codex P1). Tolerate None (test fakes / older SDK
-        # that don't surface stop_reason); reject any present value other than end_turn.
+        # it could tier on a partial judgment (codex P1). Tolerate None (test fakes that don't
+        # surface stop_reason); reject any present value other than end_turn.
         sr = getattr(response, "stop_reason", None)
         if sr is not None and sr != "end_turn":
-            raise JudgeValidationError(f"abnormal model stop_reason={sr!r}")
+            detail = getattr(response, "stop_details", None)
+            cat = getattr(detail, "category", None) if detail is not None else None
+            raise JudgeValidationError(
+                f"abnormal model stop_reason={sr!r}"
+                + (f" (refusal category={cat!r})" if sr == "refusal" else "")
+                + (f" (max_tokens={base_kwargs['max_tokens']} exhausted by thinking+output)"
+                   if sr == "max_tokens" else "")
+            )
         try:
             text = _extract_json_text(response)
             obj = json.loads(text)
-            return validate_judge_output(obj, ticker)
+            verdict = validate_judge_output(obj, ticker)
+            # A judgment about a different company must never be filed under this one (a
+            # zero-flag verdict for the wrong ticker would publish a false Green). Compare
+            # class-punctuation-folded (BRK.B == BRK-B); a mismatch retries, then fails closed.
+            if _tkey(obj.get("ticker")) != _tkey(ticker):
+                raise JudgeValidationError(
+                    f"judge answered for ticker {obj.get('ticker')!r}, asked about {ticker!r}")
         except (JudgeValidationError, json.JSONDecodeError, ValueError) as exc:
             last_err = exc
             continue
+        verdict["model_served"] = _served_model(response, base_kwargs["model"], ticker)
+        verdict["judge_degraded"] = degraded
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            # One line per name in the Actions log, so the per-run cost of the Fable routing is
+            # measured from real runs instead of estimated (output includes thinking tokens).
+            print(f"  usage {ticker}: model={verdict['model_served']} "
+                  f"in={getattr(usage, 'input_tokens', '?')} "
+                  f"out={getattr(usage, 'output_tokens', '?')}", flush=True)
+        return verdict
     raise JudgeValidationError(f"judge output invalid after retries: {last_err}")
 
 
-def _create_with_fallback(client, kwargs: dict):
-    """messages.create with server-side refusal fallback when available, else plain.
+def _tkey(t) -> str:
+    return str(t or "").strip().upper().replace(".", "-").replace("/", "-")
 
-    Fallbacks are a beta param; if the SDK/endpoint rejects it we degrade to a plain create
-    (still safe — a refusal is then caught by the stop_reason check upstream).
-    """
+
+def _served_model(response, requested: str, ticker: str) -> str:
+    """Which model actually produced the judgment; WARN loudly when it isn't the requested one
+    (a server-side refusal fallback served it, or the 404 fallback fired)."""
+    served = getattr(response, "model", None)
+    served = served if isinstance(served, str) and served else requested
+    if served.startswith(requested):
+        # The API may echo a snapshot-suffixed id for an alias; that is still the policy
+        # model, and warning on it would make this warning always-true.
+        served = requested
+    fell_back = any(getattr(b, "type", None) == "fallback"
+                    for b in (getattr(response, "content", []) or []))
+    if served != requested or fell_back:
+        print(f"WARNING [forensic_triage] {ticker}: judgment served by {served!r}, "
+              f"not {requested!r} (fallback fired)", flush=True)
+    return served
+
+
+def _create_judge_message(client, kwargs: dict):
+    """One judgment request. Production path: beta endpoint with the server-side refusal
+    fallback to FALLBACK_MODEL. `fallbacks` goes in extra_body because the pinned SDK
+    (anthropic 0.86.0) has no typed `fallbacks` kwarg: the previous code passed it as a kwarg,
+    got a TypeError, and silently dropped to a plain create on every call, so the fallback
+    was never actually on.
+
+    Returns (response, degraded) where `degraded` is None on the normal path, else a short
+    reason the caller surfaces in the heartbeat and the committed report:
+      - a 404 (the model pulled, as in the 2026-06-25 Fable outage) retries ONCE on
+        FALLBACK_MODEL;
+      - a 400 that names the fallback feature (the beta changed or was withdrawn server-side)
+        retries ONCE on the policy model WITHOUT the refusal fallback, so an optional safety
+        net going away cannot take the whole lane down.
+    Every other error propagates (fail loudly, never swallow)."""
     beta = getattr(client, "beta", None)
-    if beta is not None and hasattr(getattr(beta, "messages", None), "create"):
-        try:
-            return beta.messages.create(
-                betas=["server-side-fallback-2026-06-01"],
-                fallbacks=[{"model": FALLBACK_MODEL}],
-                **kwargs,
-            )
-        except TypeError:
-            pass  # SDK too old for fallbacks/betas kwargs
-        except Exception:
-            pass  # beta endpoint unavailable -> fall through to plain create
-    return client.messages.create(**kwargs)
+    beta_msgs = getattr(beta, "messages", None) if beta is not None else None
+    if beta_msgs is None or not hasattr(beta_msgs, "create"):
+        # Minimal clients (test doubles) without the beta surface.
+        return client.messages.create(**kwargs), None
+    try:
+        return beta_msgs.create(
+            betas=[FALLBACK_BETA],
+            extra_body={"fallbacks": [{"model": FALLBACK_MODEL}]},
+            **kwargs,
+        ), None
+    except Exception as exc:  # noqa: BLE001 - re-raised unless it is one of the two cases
+        status = getattr(exc, "status_code", None)
+        if status == 404 and kwargs.get("model") != FALLBACK_MODEL:
+            print(f"WARNING [forensic_triage] model {kwargs.get('model')!r} returned 404 "
+                  f"({exc}); retrying on {FALLBACK_MODEL!r}. MODEL_POLICY restoration needed.",
+                  flush=True)
+            return (beta_msgs.create(**{**kwargs, "model": FALLBACK_MODEL}),
+                    f"404 on {kwargs.get('model')}")
+        if status == 400 and "fallback" in str(exc).lower():
+            print(f"WARNING [forensic_triage] refusal-fallback beta rejected ({exc}); "
+                  f"retrying WITHOUT refusal fallback on {kwargs.get('model')!r}.", flush=True)
+            return client.messages.create(**kwargs), "refusal fallback unavailable (beta 400)"
+        raise
 
 
 # --------------------------------------------------------------------------------------
@@ -319,6 +411,8 @@ def tier_one(
         verdict = call_judge(rubric, record, client=client, model=model)
     else:
         verdict = validate_judge_output(judge, ticker)
+        verdict["model_served"] = None
+        verdict["judge_degraded"] = None
 
     tier, reason = finalize_tier(
         flags=verdict["flags"],
@@ -358,6 +452,38 @@ def tier_one(
         "flag_details": verdict["flag_details"] or reason,
         "coverage": coverage,
         "status": status,
+        # Which model produced the judgment (None when a verdict was injected). The runner
+        # surfaces any name not served by MODEL_ID in the heartbeat note.
+        "model_served": verdict.get("model_served"),
+        "judge_degraded": verdict.get("judge_degraded"),
+    }
+
+
+def judge_failed_result(record: dict, *, subgroup: str, error: Exception) -> dict:
+    """Result for a name whose judgment could not be obtained (refusal through the whole
+    fallback chain, max_tokens truncation, malformed output after retries).
+
+    Never Green and never `complete`: it is tiered DataGap (manual review) with status
+    `judge_failed`, so next_batch re-screens it next run and the circuit breaker counts it.
+    This replaces letting the exception escape, which discarded every name already judged in
+    the batch and re-picked the same batch the next day."""
+    ticker = record.get("ticker", "?")
+    coverage = _coverage_from_record(record, subgroup)
+    return {
+        "ticker": ticker,
+        "subgroup": subgroup,
+        "tier": "DataGap",
+        "reason": f"judge failed - NOT screened, retries next run ({error})",
+        "flags": {fam: 0 for fam in FAMILIES},
+        "critical_governance": False,
+        "high_severity": False,
+        "corporate_action": None,
+        "concerns": [],
+        "flag_details": f"judge failed: {error}",
+        "coverage": coverage,
+        "status": "judge_failed",
+        "model_served": None,
+        "judge_degraded": None,
     }
 
 
@@ -392,10 +518,12 @@ def circuit_breaker_tripped(results: list[dict]) -> tuple[bool, str]:
     n = len(results)
     if n < CIRCUIT_BREAKER_MIN_BATCH:
         return False, ""
-    failed = sum(1 for r in results if r.get("status") == "fetch_failed")
+    # judge_failed counts too: a batch where most judgments fail is an API/model problem, and
+    # committing it as a page of DataGaps would hide that.
+    failed = sum(1 for r in results if r.get("status") in ("fetch_failed", "judge_failed"))
     frac = failed / n
     if frac > CIRCUIT_BREAKER_FRACTION:
-        return True, f"{failed}/{n} names fetch_failed ({frac:.0%} > {CIRCUIT_BREAKER_FRACTION:.0%}) — likely broad outage"
+        return True, f"{failed}/{n} names fetch_failed/judge_failed ({frac:.0%} > {CIRCUIT_BREAKER_FRACTION:.0%}) — likely broad outage"
     return False, ""
 
 
@@ -510,13 +638,20 @@ def _load_subgroups() -> dict:
     return out
 
 
-def _new_names() -> set:
-    """Tickers in the watchlist that have no prior flags_history row (first appearance -> auto-Yellow)."""
-    wl = ROOT / "data" / "watchlist.csv"
+def _new_names(path: Path = FLAGS_HISTORY_CSV, wl: Path | None = None) -> set:
+    """Tickers in the watchlist with no prior COMPLETE flags_history row (first appearance ->
+    auto-Yellow). A fetch_failed / judge_failed row is not a screen, so it must not spend the
+    name's first-appearance Yellow (mirrors _prior_flags, which also ignores those rows)."""
+    wl = wl or (ROOT / "data" / "watchlist.csv")
     seen_hist = set()
-    if FLAGS_HISTORY_CSV.exists():
-        with FLAGS_HISTORY_CSV.open(encoding="utf-8", newline="") as f:
-            for row in csv.DictReader(f):
+    if path.exists():
+        with path.open(encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            has_status = "status" in (reader.fieldnames or [])
+            for row in reader:
+                status = (row.get("status") or "").strip() if has_status else "complete"
+                if status not in ("", "complete"):
+                    continue
                 seen_hist.add((row.get("ticker") or "").upper())
     new = set()
     if wl.exists():

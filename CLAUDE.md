@@ -276,6 +276,8 @@ leverage_flag, governance_flag, market_flag, text_flag, sector_flag, flag_detail
 ```
 Boolean columns are 0/1. `tier` ∈ {`Red`, `Yellow`, `Green`, `DataGap`, `CorporateAction`}. `flag_details` is a free-text column listing which specific rules fired and the values — for `governance_flag`, mark each as `critical` (§6a) or `soft` (§6b) so the diff can tell an 8-K 4.02 from routine CFO churn. **Do not write `DataGap`/`CorporateAction` rows from the degraded Saturday trigger** — only persist interactive-run results.
 
+`status` values: `complete`, `fetch_failed`, `judge_failed` and `no_10k`. **`no_10k` (2026-11-09, board #677) parks a registrant EDGAR confirms has no 10-K**, such as a recent listing or a spin-off. It is done for 30 days (`NO_10K_RECHECK_DAYS`), then re-checked so a first 10-K gets screened without moving the cycle start. It is neither screened nor pending: the dashboard lists it on its own `Parked` line and the heartbeat does not count it. A failed lookup or edgartools' `not_found` placeholder records `10k_lookup_failed` and retries instead. The picker uses each name's newest real outcome; `fetch_failed` and `judge_failed` rows are not outcomes.
+
 ### ratios_latest.csv
 ```
 ticker, fetch_date, dso_days, dso_yoy_change, inventory_days, inv_yoy_change,

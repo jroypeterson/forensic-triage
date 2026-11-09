@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 
 from . import edgar_fetch, notify, tier_batch
-from .forensic_schema import FAMILIES
+from .forensic_schema import FAMILIES, STATUS_PARKED_NO_10K
 
 DATA = ROOT / "data"
 REPORTS = ROOT / "Forensic Reports"
@@ -141,6 +141,12 @@ def _model_note(results: list[dict]) -> str:
     return "ok" if not parts else " | ".join(parts)
 
 
+def _n_screened(results: list[dict]) -> int:
+    """Names actually evaluated. A judge_failed name or a parked no-10-K name was not, so the
+    heartbeat can't read "screened 6" when only 3 judgments came back."""
+    return sum(1 for r in results if r.get("status") not in ("judge_failed", STATUS_PARKED_NO_10K))
+
+
 def _counts(results: list[dict]) -> dict:
     c: dict[str, int] = {}
     for r in results:
@@ -241,9 +247,7 @@ def notify_only(*, run_id: str) -> int:
     ok_f, det_f = notify.post_forensic(results, run_id=run_id, run_date=run_date, commit=commit)
     counts = _counts(results)
     missing = _missing_required(results)
-    # A judge_failed name was not screened: keep it out of "screened" so the heartbeat can't
-    # read "screened 6" when only 3 judgments came back.
-    n_screened = sum(1 for r in results if r.get("status") != "judge_failed")
+    n_screened = _n_screened(results)
     ok_h, det_h = notify.post_heartbeat(
         run_id=run_id, run_date=run_date, n_screened=n_screened, counts=counts,
         missing_required=missing, commit=commit, ok=data.get("ok", True), note=data.get("note", ""),

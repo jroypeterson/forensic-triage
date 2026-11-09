@@ -33,6 +33,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from . import coverage_cohorts as cc
+from . import next_batch
 
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
@@ -98,6 +99,10 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
     watchlist = load_watchlist()
     rosters = cc.load_rosters()
     screens = latest_screens(cycle_start)
+    # Done for now but never evaluated: a parked no-10-K name is neither screened nor pending.
+    parked = next_batch.screened_since(
+        cycle_start, today=date.fromisoformat(today), history=FLAGS_HISTORY_CSV
+    ) - set(screens)
 
     def _cohort(row):
         c = (row.get("cohort") or "").strip()  # baked at sync (CI-safe)
@@ -135,7 +140,7 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
                     "ticker": tk, "tier": sc["tier"],
                     "concern": _first_concern(sc["flag_details"]),
                 })
-        elif not is_foreign:
+        elif not is_foreign and tk not in parked:
             b["pending"] += 1
 
     # Disjoint roster sizes = what SHOULD be in each ring, INCLUDING names forensic

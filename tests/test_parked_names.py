@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from forensic_triage import edgar_fetch, next_batch, run_unattended, tier_batch  # noqa: E402
+from forensic_triage import dashboard, edgar_fetch, next_batch, run_unattended, tier_batch  # noqa: E402
 from forensic_triage.forensic_schema import (  # noqa: E402
     FAMILIES,
     NO_10K_FOUND,
@@ -164,6 +164,51 @@ def test_a_complete_screen_stays_done_past_the_recheck_window(tmp_path, monkeypa
     _history(history, ["2026-07-01", "ACME", "complete"])
     monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
     assert "ACME" in next_batch.screened_since("2026-06-20", today=date(2026, 11, 9))
+
+
+@pytest.mark.parametrize(
+    "rows, is_done",
+    [
+        ([["2026-07-01", "ACME", "complete"], ["2026-09-01", "ACME", STATUS_PARKED_NO_10K]], False),
+        ([["2026-07-01", "ACME", "complete"], ["2026-11-01", "ACME", STATUS_PARKED_NO_10K]], True),
+        ([["2026-09-01", "ACME", STATUS_PARKED_NO_10K], ["2026-10-01", "ACME", "complete"]], True),
+        ([["2026-07-01", "ACME", "complete"], ["2026-10-01", "ACME", "fetch_failed"]], True),
+        ([["2026-09-01", "ACME", STATUS_PARKED_NO_10K], ["2026-11-01", "ACME", "fetch_failed"]], False),
+    ],
+)
+def test_the_newest_real_outcome_decides_whether_a_name_is_done(tmp_path, monkeypatch, rows, is_done):
+    history = tmp_path / "flags_history.csv"
+    _history(history, *rows)
+    monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
+    assert ("ACME" in next_batch.screened_since("2026-06-20", today=date(2026, 11, 9))) is is_done
+
+
+@pytest.mark.parametrize("today, pending", [("2026-11-09", 1), ("2026-12-15", 2)])
+def test_the_dashboard_counts_a_parked_name_as_neither_screened_nor_pending(tmp_path, monkeypatch, today, pending):
+    history = tmp_path / "flags_history.csv"
+    with history.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["run_date", "ticker", "tier", "flag_details", "status"])
+        writer.writerow(["2026-11-05", "ACME", "DataGap", "", STATUS_PARKED_NO_10K])
+    monkeypatch.setattr(dashboard, "FLAGS_HISTORY_CSV", history)
+    monkeypatch.setattr(
+        dashboard,
+        "load_watchlist",
+        lambda: [
+            {"ticker": "ACME", "cohort": "core", "filer_type": "domestic"},
+            {"ticker": "WXYZ", "cohort": "core", "filer_type": "domestic"},
+        ],
+    )
+    monkeypatch.setattr(dashboard, "_load_cohort_totals", lambda: {"core": 2})
+    monkeypatch.setattr(dashboard, "_load_history", lambda: [])
+    monkeypatch.setattr(dashboard.cc, "load_rosters", lambda: {})
+    core = dashboard.gather(cycle_start="2026-06-20", per_day=6, today=today)["cohorts"]["core"]
+    assert (core["screened"], core["pending"]) == (0, pending)
+
+
+def test_the_heartbeat_does_not_count_a_parked_or_failed_name_as_screened():
+    results = [{"status": "complete"}, {"status": STATUS_PARKED_NO_10K}, {"status": "judge_failed"}]
+    assert run_unattended._n_screened(results) == 1
 
 
 def test_a_parked_result_reaches_the_picker_through_the_real_history_row(tmp_path, monkeypatch):

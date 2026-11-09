@@ -4,10 +4,18 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from forensic_triage import coverage_cohorts as cc  # noqa: E402
 from forensic_triage import dashboard  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_live_history(tmp_path, monkeypatch):
+    """gather() reads the history file for parked names; keep the live file out of these tests."""
+    monkeypatch.setattr(dashboard, "FLAGS_HISTORY_CSV", tmp_path / "absent.csv")
 
 
 # --- cohort priority (disjoint rings) ---

@@ -47,27 +47,33 @@ def load_watchlist() -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def screened_since(cycle_start: str, today: date | None = None) -> set[str]:
+def screened_since(cycle_start: str, today: date | None = None, history: Path | None = None) -> set[str]:
     """Tickers DONE this cycle: a flags_history row dated >= cycle_start with status=complete.
 
     A `status=fetch_failed` row does NOT count as done (transient failure retries next run).
     A `status=no_10k` row counts only for NO_10K_RECHECK_DAYS, then the name is checked again.
     Rows without a `status` column (legacy interactive runs) are treated as complete."""
-    if not FLAGS_HISTORY_CSV.exists():
+    history = history or FLAGS_HISTORY_CSV
+    if not history.exists():
         return set()
     recheck_cutoff = ((today or date.today()) - timedelta(days=NO_10K_RECHECK_DAYS)).isoformat()
-    done: set[str] = set()
-    with FLAGS_HISTORY_CSV.open(encoding="utf-8", newline="") as f:
+    latest: dict[str, tuple[str, str]] = {}  # newest outcome per ticker; a failed attempt is not one
+    with history.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         has_status = "status" in (reader.fieldnames or [])
         for row in reader:
             if (row.get("run_date") or "") < cycle_start or not row.get("ticker"):
                 continue
             status = (row.get("status") or "").strip() if has_status else "complete"
-            parked_recently = status == STATUS_PARKED_NO_10K and row["run_date"] >= recheck_cutoff
-            if status in ("", "complete") or parked_recently:
-                done.add(row["ticker"].strip().upper())
-    return done
+            if status not in ("", "complete", STATUS_PARKED_NO_10K):
+                continue
+            ticker = row["ticker"].strip().upper()
+            if ticker not in latest or row["run_date"] >= latest[ticker][0]:
+                latest[ticker] = (row["run_date"], status)
+    return {
+        ticker for ticker, (run_date, status) in latest.items()
+        if status != STATUS_PARKED_NO_10K or run_date >= recheck_cutoff
+    }
 
 
 def row_cohort(row: dict, rosters: dict[str, set[str]] | None = None) -> str:

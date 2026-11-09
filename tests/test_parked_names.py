@@ -1,0 +1,142 @@
+"""#677: case-variant tickers count as done, and a confirmed no-10-K registrant stops retrying."""
+from __future__ import annotations
+
+import csv
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from forensic_triage import edgar_fetch, next_batch, run_unattended, tier_batch  # noqa: E402
+from forensic_triage.forensic_schema import FAMILIES, NO_10K_FOUND  # noqa: E402
+
+UNAVAILABLE = {f: "unavailable" for f in FAMILIES}
+ERRORS = [{"source": "rest:statements", "error": "404"}]
+VERDICT = {
+    "ticker": "ACME",
+    "flags": {f: 0 for f in FAMILIES},
+    "critical_governance": False,
+    "high_severity": False,
+    "corporate_action": None,
+    "concerns": [],
+    "flag_details": "",
+}
+
+
+class _Company:
+    """get_filings answers per form: a list of filings, or an exception to raise."""
+
+    def __init__(self, ten_k):
+        self.ten_k = ten_k
+
+    def get_filings(self, form=None):
+        if form != "10-K":
+            return []
+        if isinstance(self.ten_k, Exception):
+            raise self.ten_k
+        return self.ten_k
+
+
+class _UndatedFiling:
+    accession_no = "x"
+    filing_date = ""
+    period_of_report = ""
+    fiscal_year = ""
+
+
+class _Filings(list):
+    def latest(self):
+        return self[0]
+
+
+def _staleness(company) -> dict:
+    rec: dict = {}
+    edgar_fetch._populate_filings(rec, company)
+    return rec["staleness"]
+
+
+def _status_for(company) -> str:
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": UNAVAILABLE,
+        "staleness": _staleness(company),
+        "source_errors": ERRORS,
+    }
+    return tier_batch.tier_one(record, subgroup="general", judge=VERDICT)["status"]
+
+
+def test_an_empty_answer_is_a_confirmed_no_10k():
+    assert _staleness(_Company([])) == {"is_stale": True, "reason": NO_10K_FOUND}
+
+
+def test_a_failed_lookup_is_not_reported_as_no_10k():
+    assert _staleness(_Company(ConnectionError("SEC 429")))["reason"] != NO_10K_FOUND
+
+
+def test_a_10k_with_no_readable_date_is_not_reported_as_no_10k():
+    assert _staleness(_Company(_Filings([_UndatedFiling()])))["reason"] != NO_10K_FOUND
+
+
+def test_a_confirmed_no_10k_registrant_is_parked():
+    assert _status_for(_Company([])) == "complete"
+
+
+def test_an_edgar_outage_keeps_retrying():
+    assert _status_for(_Company(ConnectionError("SEC 429"))) == "fetch_failed"
+
+
+def test_an_undated_10k_keeps_retrying():
+    assert _status_for(_Company(_Filings([_UndatedFiling()]))) == "fetch_failed"
+
+
+def test_a_parked_name_is_not_green():
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": UNAVAILABLE,
+        "staleness": _staleness(_Company([])),
+        "source_errors": ERRORS,
+    }
+    assert tier_batch.tier_one(record, subgroup="general", judge=VERDICT)["tier"] == "DataGap"
+
+
+@pytest.fixture
+def mixed_case_store(tmp_path, monkeypatch):
+    history = tmp_path / "flags_history.csv"
+    with history.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["run_date", "ticker", "status"])
+        writer.writerow(["2026-10-01", "VCEL", "complete"])
+        writer.writerow(["2026-10-01", "abcd", "complete"])
+    monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
+    monkeypatch.setattr(next_batch.cc, "load_rosters", lambda: {})
+    monkeypatch.setattr(
+        next_batch,
+        "load_watchlist",
+        lambda: [
+            {"ticker": "VCEl", "filer_type": "domestic", "cohort": "core", "sector_subgroup": "medtech"},
+            {"ticker": "ABCD", "filer_type": "domestic", "cohort": "core", "sector_subgroup": "medtech"},
+            {"ticker": "WXYZ", "filer_type": "domestic", "cohort": "core", "sector_subgroup": "medtech"},
+        ],
+    )
+
+
+def test_the_unattended_picker_treats_a_case_variant_as_done(mixed_case_store):
+    assert run_unattended._pick_batch(5, "2026-06-20") == ["WXYZ"]
+
+
+def test_the_interactive_picker_treats_a_case_variant_as_done(mixed_case_store, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["next_batch"])
+    assert next_batch.main() == 0
+    out = capsys.readouterr().out
+    assert "screened this cycle: 2/3" in out
+    assert "VCEl" not in out
+
+
+def test_the_committed_watchlist_has_only_upper_case_tickers():
+    with next_batch.WATCHLIST_CSV.open(encoding="utf-8", newline="") as f:
+        offenders = [r["ticker"] for r in csv.DictReader(f) if r["ticker"] != r["ticker"].upper()]
+    assert offenders == []

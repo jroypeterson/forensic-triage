@@ -61,7 +61,7 @@ def screened_since(cycle_start: str) -> set[str]:
                 continue
             status = (row.get("status") or "").strip() if has_status else "complete"
             if status in ("", "complete"):
-                done.add(row["ticker"].strip())
+                done.add(row["ticker"].strip().upper())
     return done
 
 
@@ -92,11 +92,11 @@ def main() -> int:
     foreign = [r for r in watchlist if r.get("filer_type") == "foreign"]
     done = screened_since(args.cycle_start)
 
-    pending = [r for r in domestic if r["ticker"].strip() not in done]
+    pending = [r for r in domestic if r["ticker"].strip().upper() not in done]
     pending.sort(key=lambda r: sort_key(r, rosters))
 
     n_dom = len(domestic)
-    n_done = sum(1 for r in domestic if r["ticker"].strip() in done)
+    n_done = sum(1 for r in domestic if r["ticker"].strip().upper() in done)
     print(f"Cycle start: {args.cycle_start}")
     print(f"Domestic screened this cycle: {n_done}/{n_dom}  ({n_dom - n_done} pending)")
     print(f"Foreign (Data Gap, not EDGAR-screened): {len(foreign)}")

@@ -24,6 +24,10 @@ FAMILIES = [
 COVERAGE = {"complete", "partial", "unavailable", "not_evaluated", "not_applicable"}
 COVERAGE_OK_FOR_GREEN = {"complete", "not_applicable"}  # everything else blocks Green on a REQUIRED family
 
+# staleness.reason when EDGAR answered and the registrant has no 10-K (a recent listing or a
+# spin-off). Structural, so the name is done this cycle. A lookup that FAILED must not use this.
+NO_10K_FOUND = "no_10k_found"
+
 # Required-vs-optional family matrix (codex R2). A name is Green-eligible only when every
 # REQUIRED family is complete/not_applicable. OPTIONAL families may be not_evaluated/partial
 # without blocking Green (their inputs — short interest, FDA recalls, transcripts, peer medians —

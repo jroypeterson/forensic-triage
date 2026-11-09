@@ -56,7 +56,7 @@ def _pick_batch(n: int, cycle_start: str) -> list[str]:
     rosters = nb.cc.load_rosters()  # empty in CI; sort_key falls back to the baked `cohort` column
     domestic = [r for r in watch if r.get("filer_type", "domestic") != "foreign"]
     done = nb.screened_since(cycle_start)
-    pending = [r for r in domestic if r["ticker"].strip() not in done]
+    pending = [r for r in domestic if r["ticker"].strip().upper() not in done]
     pending.sort(key=lambda r: nb.sort_key(r, rosters))
     return [r["ticker"].strip().upper() for r in pending[:n]]
 

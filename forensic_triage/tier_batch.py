@@ -28,6 +28,7 @@ from .forensic_schema import (
     COVERAGE,
     FAMILIES,
     HISTORY_COLUMNS,
+    NO_10K_FOUND,
     SCHEMA_VERSION,
     required_families,
 )
@@ -490,14 +491,16 @@ def judge_failed_result(record: dict, *, subgroup: str, error: Exception) -> dic
 def _is_transient_fetch_failure(record: dict, coverage: dict, subgroup: str) -> bool:
     """True when the record represents a transient fetch failure rather than a structural gap.
 
-    Structural (NOT transient): foreign filer, genuinely stale 10-K, legitimately not-disclosed
-    notes. Transient: REST/edgartools errored such that required families came back `unavailable`
-    while the filer is domestic and not stale.
+    Structural (NOT transient): foreign filer, genuinely stale 10-K, a registrant EDGAR confirms
+    has no 10-K, legitimately not-disclosed notes. Transient: REST/edgartools errored such that
+    required families came back `unavailable` while the filer is domestic and not stale.
     """
     if record.get("filer_type") == "foreign":
         return False
-    if (record.get("staleness") or {}).get("is_stale") and (record.get("staleness") or {}).get("reason", "").startswith("latest 10-K"):
-        return False  # genuinely stale -> structural Data Gap
+    staleness = record.get("staleness") or {}
+    reason = staleness.get("reason", "")
+    if staleness.get("is_stale") and (reason.startswith("latest 10-K") or reason == NO_10K_FOUND):
+        return False  # genuinely stale or never filed -> structural Data Gap
     # Any REQUIRED family `unavailable` (a fetch failure, per the schema) with source_errors present.
     any_unavailable = any(
         coverage.get(f) == "unavailable" for f in required_families(subgroup)

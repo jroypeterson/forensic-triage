@@ -35,7 +35,14 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .forensic_schema import COVERAGE, FAMILIES, NO_10K_FOUND, SCHEMA_VERSION, required_families
+from .forensic_schema import (
+    COVERAGE,
+    FAMILIES,
+    NO_10K_FOUND,
+    SCHEMA_VERSION,
+    TEN_K_LOOKUP_FAILED,
+    required_families,
+)
 
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
@@ -611,9 +618,12 @@ def _populate_filings(rec: dict, company) -> None:
     if k:
         ref = _parse_date(k.get("period_end")) or _parse_date(k.get("filing_date"))
     if ref is None:
-        # Only a clean, empty answer is "no 10-K". A failed lookup or an undated filing retries.
-        confirmed_none = k is None and "10-K" not in lookup_failed
-        rec["staleness"] = {"is_stale": True, "reason": NO_10K_FOUND if confirmed_none else "10k_lookup_failed"}
+        # Only a clean, empty answer is "no 10-K". A failed lookup, an undated filing, or
+        # edgartools' empty placeholder for a CIK SEC would not serve all retry.
+        confirmed_none = (
+            k is None and "10-K" not in lookup_failed and not getattr(company, "not_found", False)
+        )
+        rec["staleness"] = {"is_stale": True, "reason": NO_10K_FOUND if confirmed_none else TEN_K_LOOKUP_FAILED}
         return
     age = (datetime.now(timezone.utc).date() - ref).days
     if age > STALE_DAYS:

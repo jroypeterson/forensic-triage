@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import date, timedelta
 from pathlib import Path
 
 from . import coverage_cohorts as cc
+from .forensic_schema import NO_10K_RECHECK_DAYS, STATUS_PARKED_NO_10K
 
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
@@ -45,13 +47,15 @@ def load_watchlist() -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def screened_since(cycle_start: str) -> set[str]:
+def screened_since(cycle_start: str, today: date | None = None) -> set[str]:
     """Tickers DONE this cycle: a flags_history row dated >= cycle_start with status=complete.
 
     A `status=fetch_failed` row does NOT count as done (transient failure retries next run).
+    A `status=no_10k` row counts only for NO_10K_RECHECK_DAYS, then the name is checked again.
     Rows without a `status` column (legacy interactive runs) are treated as complete."""
     if not FLAGS_HISTORY_CSV.exists():
         return set()
+    recheck_cutoff = ((today or date.today()) - timedelta(days=NO_10K_RECHECK_DAYS)).isoformat()
     done: set[str] = set()
     with FLAGS_HISTORY_CSV.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -60,7 +64,8 @@ def screened_since(cycle_start: str) -> set[str]:
             if (row.get("run_date") or "") < cycle_start or not row.get("ticker"):
                 continue
             status = (row.get("status") or "").strip() if has_status else "complete"
-            if status in ("", "complete"):
+            parked_recently = status == STATUS_PARKED_NO_10K and row["run_date"] >= recheck_cutoff
+            if status in ("", "complete") or parked_recently:
                 done.add(row["ticker"].strip().upper())
     return done
 

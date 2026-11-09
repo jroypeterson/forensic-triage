@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from forensic_triage import edgar_fetch, next_batch, run_unattended, tier_batch  # noqa: E402
-from forensic_triage.forensic_schema import FAMILIES, NO_10K_FOUND  # noqa: E402
+from forensic_triage.forensic_schema import (  # noqa: E402
+    FAMILIES,
+    NO_10K_FOUND,
+    STATUS_PARKED_NO_10K,
+    TEN_K_LOOKUP_FAILED,
+)
 
 UNAVAILABLE = {f: "unavailable" for f in FAMILIES}
 ERRORS = [{"source": "rest:statements", "error": "404"}]
@@ -81,7 +87,105 @@ def test_a_10k_with_no_readable_date_is_not_reported_as_no_10k():
 
 
 def test_a_confirmed_no_10k_registrant_is_parked():
-    assert _status_for(_Company([])) == "complete"
+    assert _status_for(_Company([])) == STATUS_PARKED_NO_10K
+
+
+class _NotFoundCompany(_Company):
+    """edgartools' placeholder when SEC 404s a CIK: empty filings, and no exception."""
+
+    not_found = True
+
+
+def test_edgartools_not_found_placeholder_is_not_a_confirmed_no_10k():
+    assert _staleness(_NotFoundCompany([]))["reason"] == TEN_K_LOOKUP_FAILED
+    assert _status_for(_NotFoundCompany([])) == "fetch_failed"
+
+
+PARTIAL = {f: "partial" for f in FAMILIES}
+
+
+@pytest.mark.parametrize("errors", [[], ERRORS])
+@pytest.mark.parametrize("coverage", [PARTIAL, UNAVAILABLE])
+def test_a_failed_10k_lookup_retries_whatever_coverage_looks_like(coverage, errors):
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": coverage,
+        "staleness": {"is_stale": True, "reason": TEN_K_LOOKUP_FAILED},
+        "source_errors": errors,
+    }
+    assert tier_batch.tier_one(record, subgroup="general", judge=VERDICT)["status"] == "fetch_failed"
+
+
+def test_a_new_no_10k_name_is_a_data_gap_not_a_screened_yellow():
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": UNAVAILABLE,
+        "staleness": _staleness(_Company([])),
+        "source_errors": ERRORS,
+    }
+    assert tier_batch.tier_one(record, subgroup="general", judge=VERDICT, is_new=True)["tier"] == "DataGap"
+
+
+def test_a_critical_signal_on_a_no_10k_name_closes_the_evaluation():
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": UNAVAILABLE,
+        "staleness": _staleness(_Company([])),
+        "source_errors": ERRORS,
+    }
+    res = tier_batch.tier_one(record, subgroup="general", judge={**VERDICT, "critical_governance": True})
+    assert (res["tier"], res["status"]) == ("Red", "complete")
+
+
+def _history(path, *rows):
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["run_date", "ticker", "status"])
+        writer.writerows(rows)
+
+
+@pytest.mark.parametrize(
+    "run_date, is_done",
+    [("2026-11-09", True), ("2026-10-10", True), ("2026-10-09", False)],
+)
+def test_a_parked_name_is_done_only_for_the_recheck_window(tmp_path, monkeypatch, run_date, is_done):
+    history = tmp_path / "flags_history.csv"
+    _history(history, [run_date, "ALMR", STATUS_PARKED_NO_10K])
+    monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
+    done = next_batch.screened_since("2026-06-20", today=date(2026, 11, 9))
+    assert ("ALMR" in done) is is_done
+
+
+def test_a_complete_screen_stays_done_past_the_recheck_window(tmp_path, monkeypatch):
+    history = tmp_path / "flags_history.csv"
+    _history(history, ["2026-07-01", "ACME", "complete"])
+    monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
+    assert "ACME" in next_batch.screened_since("2026-06-20", today=date(2026, 11, 9))
+
+
+def test_a_parked_result_reaches_the_picker_through_the_real_history_row(tmp_path, monkeypatch):
+    record = {
+        "ticker": "ACME",
+        "filer_type": "domestic",
+        "family_coverage": UNAVAILABLE,
+        "staleness": _staleness(_Company([])),
+        "source_errors": ERRORS,
+    }
+    row = tier_batch.result_to_history_row(
+        tier_batch.tier_one(record, subgroup="general", judge=VERDICT), run_id="r"
+    )
+    history = tmp_path / "flags_history.csv"
+    with history.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    monkeypatch.setattr(next_batch, "FLAGS_HISTORY_CSV", history)
+    run_day = date.fromisoformat(row["run_date"])
+    assert "ACME" in next_batch.screened_since("2026-06-20", today=run_day)
+    assert "ACME" not in next_batch.screened_since("2026-06-20", today=run_day + timedelta(days=31))
 
 
 def test_an_edgar_outage_keeps_retrying():

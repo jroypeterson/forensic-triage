@@ -30,6 +30,8 @@ from .forensic_schema import (
     HISTORY_COLUMNS,
     NO_10K_FOUND,
     SCHEMA_VERSION,
+    STATUS_PARKED_NO_10K,
+    TEN_K_LOOKUP_FAILED,
     required_families,
 )
 from .forensic_tier import finalize_tier
@@ -406,6 +408,7 @@ def tier_one(
     # A transient fetch failure (source_errors AND nothing usable) must NOT be finalized as a
     # clean tier — it's "incomplete this run, retry next run". Foreign/stale = STRUCTURAL gap = done.
     fetch_failed = _is_transient_fetch_failure(record, coverage, subgroup)
+    no_10k = _is_confirmed_no_10k(record)
 
     if judge is None:
         rubric = load_rubric(subgroup)
@@ -422,7 +425,7 @@ def tier_one(
         critical_governance=verdict["critical_governance"],
         high_severity=verdict["high_severity"],
         corporate_action=verdict["corporate_action"],
-        is_new=is_new,
+        is_new=is_new and not no_10k,  # nothing to baseline yet: Data Gap, not a screened Yellow
         prior_flags=prior_flags,
     )
 
@@ -437,6 +440,8 @@ def tier_one(
     has_signal = verdict["critical_governance"] or verdict["high_severity"]
     if fetch_failed and not has_signal:
         status = "fetch_failed"
+    elif no_10k and not has_signal:
+        status = STATUS_PARKED_NO_10K
     else:
         status = "complete"
 
@@ -488,6 +493,15 @@ def judge_failed_result(record: dict, *, subgroup: str, error: Exception) -> dic
     }
 
 
+def _is_confirmed_no_10k(record: dict) -> bool:
+    staleness = record.get("staleness") or {}
+    return (
+        record.get("filer_type") != "foreign"
+        and bool(staleness.get("is_stale"))
+        and staleness.get("reason") == NO_10K_FOUND
+    )
+
+
 def _is_transient_fetch_failure(record: dict, coverage: dict, subgroup: str) -> bool:
     """True when the record represents a transient fetch failure rather than a structural gap.
 
@@ -499,6 +513,8 @@ def _is_transient_fetch_failure(record: dict, coverage: dict, subgroup: str) -> 
         return False
     staleness = record.get("staleness") or {}
     reason = staleness.get("reason", "")
+    if staleness.get("is_stale") and reason == TEN_K_LOOKUP_FAILED:
+        return True  # we never learned whether a 10-K exists, whatever coverage looks like
     if staleness.get("is_stale") and (reason.startswith("latest 10-K") or reason == NO_10K_FOUND):
         return False  # genuinely stale or never filed -> structural Data Gap
     # Any REQUIRED family `unavailable` (a fetch failure, per the schema) with source_errors present.

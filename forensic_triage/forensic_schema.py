@@ -27,6 +27,12 @@ COVERAGE_OK_FOR_GREEN = {"complete", "not_applicable"}  # everything else blocks
 # staleness.reason when EDGAR answered and the registrant has no 10-K (a recent listing or a
 # spin-off). Structural, so the name is done this cycle. A lookup that FAILED must not use this.
 NO_10K_FOUND = "no_10k_found"
+TEN_K_LOOKUP_FAILED = "10k_lookup_failed"  # we could not tell, so the name always retries
+
+# History status for a confirmed no-10-K name. It is done only for NO_10K_RECHECK_DAYS, because
+# a recent listing files its first 10-K eventually and the cycle start does not move by itself.
+STATUS_PARKED_NO_10K = "no_10k"
+NO_10K_RECHECK_DAYS = 30
 
 # Required-vs-optional family matrix (codex R2). A name is Green-eligible only when every
 # REQUIRED family is complete/not_applicable. OPTIONAL families may be not_evaluated/partial

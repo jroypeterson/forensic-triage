@@ -206,6 +206,27 @@ def test_the_dashboard_counts_a_parked_name_as_neither_screened_nor_pending(tmp_
     assert (core["screened"], core["pending"]) == (0, pending)
 
 
+def test_every_dashboard_surface_names_a_parked_company(tmp_path, monkeypatch):
+    history = tmp_path / "flags_history.csv"
+    with history.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["run_date", "ticker", "tier", "flag_details", "status"])
+        writer.writerow(["2026-11-05", "ACME", "DataGap", "", STATUS_PARKED_NO_10K])
+    monkeypatch.setattr(dashboard, "FLAGS_HISTORY_CSV", history)
+    monkeypatch.setattr(
+        dashboard, "load_watchlist", lambda: [{"ticker": "ACME", "cohort": "core", "filer_type": "domestic"}]
+    )
+    monkeypatch.setattr(dashboard, "_load_cohort_totals", lambda: {"core": 1})
+    monkeypatch.setattr(dashboard, "_load_history", lambda: [])
+    monkeypatch.setattr(dashboard.cc, "load_rosters", lambda: {})
+    data = dashboard.gather(cycle_start="2026-06-20", per_day=6, today="2026-11-09")
+    assert data["parked"] == ["ACME"]
+    assert "ACME" in dashboard.to_plaintext(data)
+    assert "ACME" in dashboard.render_html(data)
+    blocks, _ = dashboard.build_blocks(data)
+    assert any("ACME" in str(b) for b in blocks)
+
+
 def test_the_heartbeat_does_not_count_a_parked_or_failed_name_as_screened():
     results = [{"status": "complete"}, {"status": STATUS_PARKED_NO_10K}, {"status": "judge_failed"}]
     assert run_unattended._n_screened(results) == 1

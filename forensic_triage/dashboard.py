@@ -34,6 +34,7 @@ from pathlib import Path
 
 from . import coverage_cohorts as cc
 from . import next_batch
+from .forensic_schema import NO_10K_RECHECK_DAYS
 
 ROOT = Path(__file__).resolve().parents[1]  # package file -> project root
 WATCHLIST_CSV = ROOT / "data" / "watchlist.csv"
@@ -117,6 +118,7 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
         "flagged": [],  # [{ticker, tier, concern}] for Red/Yellow
     }
     coh = {c: blank() for c in COHORTS}
+    parked_listed: list[str] = []
 
     for r in watchlist:
         tk = (r.get("ticker") or "").strip().upper()
@@ -140,8 +142,11 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
                     "ticker": tk, "tier": sc["tier"],
                     "concern": _first_concern(sc["flag_details"]),
                 })
-        elif not is_foreign and tk not in parked:
-            b["pending"] += 1
+        elif not is_foreign:
+            if tk in parked:
+                parked_listed.append(tk)
+            else:
+                b["pending"] += 1
 
     # Disjoint roster sizes = what SHOULD be in each ring, INCLUDING names forensic
     # can't screen (biopharma is excluded at sync; foreign is Data-Gap). Surfacing
@@ -220,6 +225,7 @@ def gather(cycle_start: str = DEFAULT_CYCLE_START,
         "eta_date": eta_date,
         "eta_days": eta_days,
         "flagged": flagged,
+        "parked": sorted(parked_listed),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     data["diff"] = _diff_vs_prior(data)
@@ -351,6 +357,15 @@ def _excluded_note(data: dict) -> str:
             + " · ".join(parts))
 
 
+def _parked_note(data: dict) -> str:
+    """Names neither screened nor pending must still be visible. Empty when there are none."""
+    names = data.get("parked") or []
+    if not names:
+        return ""
+    return (f"Parked ({len(names)}, not screened: no 10-K on file yet, "
+            f"re-checked every {NO_10K_RECHECK_DAYS} days): " + ", ".join(names))
+
+
 def to_plaintext(data: dict) -> str:
     t = data["totals"]
     out = []
@@ -370,6 +385,10 @@ def to_plaintext(data: dict) -> str:
     if exc:
         out.append("")
         out.append(exc)
+    parked_note = _parked_note(data)
+    if parked_note:
+        out.append("")
+        out.append(parked_note)
     if data["flagged"]:
         out.append("")
         out.append("Flagged (this cycle):")
@@ -402,6 +421,9 @@ def build_blocks(data: dict) -> tuple[list[dict], str]:
     exc = _excluded_note(data)
     if exc:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": exc}]})
+    parked_note = _parked_note(data)
+    if parked_note:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": parked_note}]})
     if data["flagged"]:
         lines = []
         for f in data["flagged"][:15]:
@@ -465,7 +487,10 @@ def render_html(data: dict) -> str:
         d = data["diff"]
         diff_line = (f"<p class='diff'>vs {d['date']}: +{d['screened']} screened · "
                      f"{d['red']:+d} red · {d['yellow']:+d} yellow</p>")
-    eta_line = (f" · full-sweep ETA ~{data['eta_date']} ({data['per_day']}/day)"
+    parked_note = _parked_note(data)
+    if parked_note:
+        diff_line += f"<p class='diff'>{_html.escape(parked_note)}</p>"
+    eta_line =(f" · full-sweep ETA ~{data['eta_date']} ({data['per_day']}/day)"
                 if data["eta_date"] else "")
     return _HTML_TMPL.format(
         today=data["today"], cycle_start=data["cycle_start"],

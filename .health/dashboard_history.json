@@ -1583,15 +1583,15 @@
   },
   {
     "date": "2026-11-12",
-    "screened": 466,
-    "pending": 215,
+    "screened": 472,
+    "pending": 209,
     "red": 28,
-    "yellow": 395,
+    "yellow": 400,
     "by_cohort": {
       "portfolio": 16,
       "researching": 12,
       "core": 161,
-      "sp500": 277,
+      "sp500": 283,
       "other": 0
     }
   }

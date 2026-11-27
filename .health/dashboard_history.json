@@ -1,19 +1,5 @@
 [
   {
-    "date": "2026-07-20",
-    "screened": 86,
-    "pending": 597,
-    "red": 7,
-    "yellow": 60,
-    "by_cohort": {
-      "portfolio": 16,
-      "researching": 11,
-      "core": 59,
-      "sp500": 0,
-      "other": 0
-    }
-  },
-  {
     "date": "2026-07-21",
     "screened": 90,
     "pending": 593,
@@ -1676,6 +1662,20 @@
       "researching": 12,
       "core": 161,
       "sp500": 361,
+      "other": 0
+    }
+  },
+  {
+    "date": "2026-11-27",
+    "screened": 556,
+    "pending": 125,
+    "red": 30,
+    "yellow": 482,
+    "by_cohort": {
+      "portfolio": 16,
+      "researching": 12,
+      "core": 161,
+      "sp500": 367,
       "other": 0
     }
   }
